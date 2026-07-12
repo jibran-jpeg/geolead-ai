@@ -406,7 +406,7 @@ const App = () => {
     scrapeProgress: rawState.scrapeProgress || INITIAL_STATE.scrapeProgress,
     scrapeError: rawState.scrapeError || '',
     selectedCategories: rawState.selectedCategories || [],
-    isOnMapsPage: rawState.isOnMapsPage || false,
+    isOnMapsPage: rawState.isOnMapsPage !== undefined ? rawState.isOnMapsPage : null,
     activeTabId: rawState.activeTabId || null,
     scrapingTabId: rawState.scrapingTabId || null,
     enrichProgress: rawState.enrichProgress || INITIAL_STATE.enrichProgress,
@@ -451,6 +451,7 @@ const App = () => {
             }
           };
         }
+        loadedState.isOnMapsPage = null; // Always fresh tab verify on mount
 
         // Migrate legacy leads to a default session if no sessions exist and not yet migrated
         if (!loadedState.legacy_migrated && loadedState.leads && loadedState.leads.length > 0 && (!loadedState.sessions || Object.keys(loadedState.sessions).length === 0)) {
