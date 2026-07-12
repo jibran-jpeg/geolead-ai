@@ -2299,6 +2299,18 @@
         return url;
     }
 
+    function getExtractedWebsiteFromGoogleRedirect(url) {
+        if (!url) return '';
+        try {
+            if (url.includes('google.com/url?') || url.includes('google.com/local/url?')) {
+                const urlObj = new URL(url);
+                const target = urlObj.searchParams.get('q') || urlObj.searchParams.get('url');
+                if (target) return target;
+            }
+        } catch (e) {}
+        return url;
+    }
+
     /**
      * Helper: Check if a URL is a Google/Maps internal URL (not a real business website)
      */
