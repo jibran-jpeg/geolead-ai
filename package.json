@@ -1,38 +1,188 @@
 {
   "name": "geolead-ai",
-  "private": true,
-  "version": "0.0.0",
-  "type": "module",
+  "version": "3.0.0",
+  "description": "Production-grade Google Maps scraper with advanced lead generation, scoring, and analysis capabilities",
+  "main": "background.js",
   "scripts": {
-    "dev": "vite",
     "build": "vite build",
-    "lint": "eslint .",
-    "preview": "vite preview"
+    "dev": "vite",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "lint": "eslint src --ext .js,.jsx",
+    "lint:fix": "eslint src --ext .js,.jsx --fix",
+    "typecheck": "tsc --noEmit",
+    "analyze": "npm run build && npx vite-bundle-analyzer dist",
+    "demo": "node scripts/demo.js",
+    "export:demo": "node scripts/demo.js"
   },
+  "keywords": [
+    "chrome-extension",
+    "lead-generation",
+    "google-maps",
+    "scraping",
+    "ai",
+    "data-extraction",
+    "website-analysis",
+    "social-media",
+    "pakistan",
+    "export",
+    "excel",
+    "csv",
+    "json"
+  ],
+  "author": "GeoLead AI Team",
+  "license": "MIT",
   "dependencies": {
-    "@crxjs/vite-plugin": "^2.0.0-beta.33",
-    "@radix-ui/react-icons": "^1.3.2",
-    "@tailwindcss/vite": "^4.2.0",
-    "lucide-react": "^0.576.0",
-    "papaparse": "^5.5.3",
-    "react": "^19.2.0",
-    "react-dom": "^19.2.0",
-    "tailwindcss": "^4.2.0",
-    "uuid": "^13.0.0",
     "xlsx": "^0.18.5",
-    "zustand": "^5.0.11"
+    "csv-parser": "^3.0.0",
+    "csv-writer": "^1.6.0",
+    "node-fetch": "^3.3.2",
+    "https": "^1.0.0",
+    "url-parse": "^1.5.10",
+    "validator": "^13.9.0",
+    "lodash": "^4.17.21",
+    "moment": "^2.29.4",
+    "winston": "^3.8.2",
+    "node-schedule": "^2.1.1",
+    "crypto-js": "^4.1.1",
+    "jsdom": "^20.0.3",
+    "cheerio": "^1.0.0-rc.12",
+    "puppeteer": "^21.1.1",
+    "axios": "^1.4.0",
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "multer": "^1.4.5-lts.1",
+    "compression": "^1.7.4",
+    "helmet": "^7.0.0",
+    "rate-limiter-flexible": "^2.4.1",
+    "ioredis": "^5.3.2",
+    "sqlite3": "^5.1.6",
+    "pg": "^8.11.3",
+    "aws-sdk": "^2.1411.0",
+    "dotenv": "^16.3.1"
   },
   "devDependencies": {
-    "@eslint/js": "^9.39.1",
-    "@iconify-json/lucide": "^1.2.95",
-    "@types/react": "^19.2.7",
-    "@types/react-dom": "^19.2.3",
-    "@vitejs/plugin-react": "^5.1.1",
-    "eslint": "^9.39.1",
-    "eslint-plugin-react-hooks": "^7.0.1",
-    "eslint-plugin-react-refresh": "^0.4.24",
-    "globals": "^16.5.0",
-    "unplugin-icons": "^23.0.1",
-    "vite": "^7.3.1"
-  }
+    "@types/jest": "^29.5.3",
+    "@types/node": "^20.4.5",
+    "@types/validator": "^13.11.1",
+    "@types/lodash": "^4.14.195",
+    "@types/crypto-js": "^4.1.1",
+    "@types/jsdom": "^21.1.1",
+    "@types/cheerio": "^0.22.31",
+    "@types/multer": "^1.4.7",
+    "@types/compression": "^1.7.2",
+    "@types/ioredis": "^4.28.10",
+    "@types/pg": "^8.10.2",
+    "typescript": "^5.1.6",
+    "vite": "^4.4.9",
+    "eslint": "^8.45.0",
+    "eslint-plugin-react": "^7.33.2",
+    "jest": "^29.6.1",
+    "puppeteer": "^21.1.1",
+    "jest-puppeteer": "^9.0.0",
+    "jest-environment-jsdom": "^29.6.1",
+    "ts-jest": "^29.1.1",
+    "@typescript-eslint/parser": "^6.2.0",
+    "@typescript-eslint/eslint-plugin": "^6.2.0",
+    "vite-plugin-eslint": "^1.8.1",
+    "vite-plugin-pwa": "^0.16.4",
+    "rollup-plugin-visualizer": "^5.9.0",
+    "cross-env": "^7.0.3",
+    "rimraf": "^5.0.1"
+  },
+  "engines": {
+    "node": ">=16.0.0",
+    "npm": ">=8.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-username/geolead-ai.git"
+  },
+  "bugs": {
+    "url": "https://github.com/your-username/geolead-ai/issues"
+  },
+  "homepage": "https://geolead-ai.com",
+  "config": {
+    "production": {
+      "maxResults": 100,
+      "enableWebsiteAnalysis": true,
+      "enableSocialMediaExtraction": true,
+      "enablePakistanRegional": true,
+      "enableDataValidation": true,
+      "enableLeadScoring": true,
+      "enableExport": true,
+      "antiDetection": {
+        "enableMouseMovements": true,
+        "enableKeyboardEvents": true,
+        "enableScrollVariation": true,
+        "randomizeDelays": true
+      }
+    },
+    "development": {
+      "maxResults": 10,
+      "enableWebsiteAnalysis": false,
+      "enableSocialMediaExtraction": false,
+      "enablePakistanRegional": false,
+      "enableDataValidation": true,
+      "enableLeadScoring": true,
+      "enableExport": true,
+      "antiDetection": {
+        "enableMouseMovements": false,
+        "enableKeyboardEvents": false,
+        "enableScrollVariation": false,
+        "randomizeDelays": false
+      }
+    }
+  },
+  "jest": {
+    "testEnvironment": "jsdom",
+    "setupFilesAfterEnv": ["<rootDir>/tests/setup.js"],
+    "testMatch": ["**/__tests__/**/*.(js|jsx|ts|tsx)", "**/*.(test|spec).(js|jsx|ts|tsx)"],
+    "collectCoverageFrom": [
+      "src/**/*.{js,jsx,ts,tsx}",
+      "!src/**/*.d.ts",
+      "!src/popup/**",
+      "!tests/**"
+    ],
+    "coverageDirectory": "coverage",
+    "coverageReporters": ["text", "lcov", "html"],
+    "moduleNameMapping": {
+      "^@/(.*)$": "<rootDir>/src/$1"
+    }
+  },
+  "eslintConfig": {
+    "extends": [
+      "eslint:recommended",
+      "@typescript-eslint/recommended"
+    ],
+    "parser": "@typescript-eslint/parser",
+    "parserOptions": {
+      "ecmaVersion": 2021,
+      "sourceType": "module",
+      "ecmaFeatures": {
+        "jsx": true
+      }
+    },
+    "env": {
+      "browser": true,
+      "node": true,
+      "es2021": true,
+      "jest": true
+    },
+    "rules": {
+      "no-console": "warn",
+      "no-unused-vars": "off",
+      "@typescript-eslint/no-unused-vars": ["error", { "argsIgnorePattern": "^_" }],
+      "@typescript-eslint/no-explicit-any": "warn",
+      "prefer-const": "error",
+      "no-var": "error"
+    }
+  },
+  "browserslist": [
+    "last 1 Chrome version",
+    "last 1 Firefox version",
+    "last 1 Safari version",
+    "last 1 Edge version"
+  ]
 }

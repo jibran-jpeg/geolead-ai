@@ -8,28 +8,27 @@
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
   },
-  "side_panel": {
-    "default_path": "index.html"
-  },
   "action": {
     "default_icon": {
       "16": "icons/icon16.png",
       "48": "icons/icon48.png"
     },
-    "default_title": "GeoLead AI"
+    "default_title": "GeoLead AI",
+    "default_popup": "index.html"
   },
   "permissions": [
     "activeTab",
     "storage",
     "tabs",
     "scripting",
-    "sidePanel",
     "downloads",
     "clipboardWrite"
   ],
   "host_permissions": [
     "https://www.google.com/maps/*",
     "https://maps.google.com/*",
+    "https://www.google.com.pk/maps/*",
+    "https://maps.google.com.pk/*",
     "https://generativelanguage.googleapis.com/*",
     "http://*/*",
     "https://*/*"
@@ -42,7 +41,9 @@
     {
       "matches": [
         "https://www.google.com/maps/*",
-        "https://maps.google.com/*"
+        "https://maps.google.com/*",
+        "https://www.google.com.pk/maps/*",
+        "https://maps.google.com.pk/*"
       ],
       "js": [
         "content.js"

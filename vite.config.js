@@ -17,6 +17,17 @@ function chromeExtensionPlugin() {
         resolve(distDir, 'manifest.json')
       )
 
+      // Post-process index.html to remove crossorigin and leading slashes
+      const htmlPath = resolve(distDir, 'index.html')
+      if (existsSync(htmlPath)) {
+        let html = readFileSync(htmlPath, 'utf-8')
+        html = html.replace(/crossorigin/g, '')
+        html = html.replace(/src="\/assets\//g, 'src="assets/')
+        html = html.replace(/href="\/assets\//g, 'href="assets/')
+        writeFileSync(htmlPath, html)
+        console.log('✓ Post-processed index.html for Chrome Extension CSP compatibility')
+      }
+
       // Copy icons
       const iconsDir = resolve(distDir, 'icons')
       if (!existsSync(iconsDir)) {

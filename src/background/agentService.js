@@ -277,14 +277,32 @@ export async function enrichLead(lead, apiKey) {
             emails: [],
             phones: [],
             services: '',
+            instagram: null,
+            facebook: null,
+            linkedin: null,
+            twitter: null,
+            youtube: null,
+            tiktok: null,
+            pinterest: null,
+            websiteAnalysis: {
+                reachable: false,
+                httpsEnabled: false,
+                redirectStatus: 'failed',
+                sslValid: false,
+                mobileFriendly: false,
+                contactPageExists: false,
+                contactFormAvailable: false,
+                socialLinksAvailable: false
+            },
             enrichmentStatus: 'NO_WEBSITE',
         };
     }
 
-    // Step 1: Fetch the homepage
-    let pageText = await fetchAndCleanUrl(lead.website);
+    // Step 1: Run the crawler to get contact details and technical checks
+    const crawlerResult = await fetchContactsFromWebsite(lead.website, lead.businessName);
 
-    // Step 2: Try common contact page paths
+    // Step 2: Fetch the homepage text for Gemini to analyze
+    let pageText = await fetchAndCleanUrl(lead.website);
     if (pageText) {
         const contactPaths = ['/contact', '/contact-us', '/about', '/about-us'];
         for (const path of contactPaths) {
@@ -294,60 +312,73 @@ export async function enrichLead(lead, apiKey) {
                 const contactText = await fetchAndCleanUrl(contactUrl);
                 if (contactText && contactText.length > 100) {
                     pageText += '\n\n--- CONTACT PAGE ---\n' + contactText;
-                    break; // Found a contact page, no need to try more
+                    break;
                 }
-            } catch {
-                // URL parsing failed, skip
-            }
+            } catch {}
         }
     }
 
     if (!pageText) {
         return {
             ownerName: '',
-            emails: [],
-            phones: [],
+            emails: crawlerResult.emails,
+            phones: crawlerResult.phones,
             services: '',
+            ...crawlerResult.socials,
+            websiteAnalysis: crawlerResult.websiteAnalysis,
             enrichmentStatus: 'FETCH_FAILED',
         };
     }
 
-    // Step 3: Ask Gemini to extract structured data
+    // Step 3: Ask Gemini to extract structured owner name / services
     const prompt = `You are a data extraction expert. Analyze the following website content for the business "${lead.businessName}".
 
 Extract the following information:
 1. **Owner/Manager Name**: The name of the business owner, founder, or main contact person. If not explicitly found, leave empty.
-2. **Email Addresses**: ALL email addresses found anywhere in the text. Look carefully for patterns like name@domain.com, info@, contact@, etc.
-3. **Phone/Mobile Numbers**: ALL phone numbers and mobile numbers. Include country codes if present.
-4. **Services**: A brief 1-2 line summary of the main services this business offers.
-5. **Has Contact Page**: Whether this content includes a dedicated contact/about page.
+2. **Services**: A brief 1-2 line summary of the main services this business offers.
 
-IMPORTANT: Only return data you can actually find in the text. Do NOT make up or guess emails/phones.
+IMPORTANT: Only return data you can actually find in the text. Do NOT make up or guess.
 
 Website content:
 ${pageText}`;
 
+    const SCHEMA = {
+        type: 'object',
+        properties: {
+            ownerName: { type: 'string', description: 'The name of the business owner or manager, if found' },
+            services: { type: 'string', description: 'Brief summary of main services offered (1-2 lines)' }
+        },
+        required: []
+    };
+
     try {
         const resultText = await agentQueue.add(() =>
-            callGeminiWithRetry(apiKey, prompt, ENRICHMENT_SCHEMA)
+            callGeminiWithRetry(apiKey, prompt, SCHEMA)
         );
 
         const result = JSON.parse(resultText);
 
+        const mergedEmails = Array.from(new Set([...(lead.emails || []), ...(crawlerResult.emails || [])]));
+        const mergedPhones = Array.from(new Set([...(lead.phones || []), ...(crawlerResult.phones || [])]));
+
         return {
             ownerName: result.ownerName || '',
-            emails: result.emails || [],
-            phones: result.phones || [],
+            emails: mergedEmails,
+            phones: mergedPhones,
             services: result.services || '',
+            ...crawlerResult.socials,
+            websiteAnalysis: crawlerResult.websiteAnalysis,
             enrichmentStatus: 'ENRICHED',
         };
     } catch (err) {
         console.error('[Agent] Enrichment failed for', lead.businessName, err?.message || err);
         return {
             ownerName: '',
-            emails: [],
-            phones: [],
+            emails: crawlerResult.emails,
+            phones: crawlerResult.phones,
             services: '',
+            ...crawlerResult.socials,
+            websiteAnalysis: crawlerResult.websiteAnalysis,
             enrichmentStatus: 'AI_ERROR',
             enrichmentError: err?.message || 'Unknown error',
         };
@@ -469,16 +500,388 @@ export async function batchEnrichLeads(leads, apiKey, onProgress) {
         const key = lead.id || lead.businessName;
         const enrichment = enrichedMap.get(key);
         if (enrichment) {
-            return {
+            const updated = {
                 ...lead,
                 ownerName: enrichment.ownerName || lead.ownerName || '',
                 emails: enrichment.emails || [],
                 phones: enrichment.phones || [],
                 services: enrichment.services || '',
+                instagram: enrichment.instagram || lead.instagram || null,
+                facebook: enrichment.facebook || lead.facebook || null,
+                linkedin: enrichment.linkedin || lead.linkedin || null,
+                twitter: enrichment.twitter || lead.twitter || null,
+                youtube: enrichment.youtube || lead.youtube || null,
+                tiktok: enrichment.tiktok || lead.tiktok || null,
+                pinterest: enrichment.pinterest || lead.pinterest || null,
+                websiteAnalysis: enrichment.websiteAnalysis || lead.websiteAnalysis || null,
                 enrichmentStatus: enrichment.enrichmentStatus,
             };
+            
+            const qualityScore = calculateLeadQualityScore(updated);
+            updated.leadQualityScore = qualityScore;
+            updated.priority = qualifyLead(updated, qualityScore);
+            return updated;
         }
-        return lead;
+        return lead; // Bug fix: return original lead if not enriched
     });
+}
+
+/**
+ * Perform a fast fetch of the business website to extract emails and phone numbers.
+ * Traverses subpages like contact, about, footer.
+ * Filters out junk emails.
+ */
+export async function fetchContactsFromWebsite(websiteUrl, businessName) {
+    if (!websiteUrl) {
+        return {
+            emails: [],
+            phones: [],
+            socials: {
+                instagram: null,
+                facebook: null,
+                linkedin: null,
+                twitter: null,
+                youtube: null,
+                tiktok: null,
+                pinterest: null
+            },
+            websiteAnalysis: {
+                reachable: false,
+                httpsEnabled: false,
+                redirectStatus: 'failed',
+                sslValid: false,
+                mobileFriendly: false,
+                contactPageExists: false,
+                contactFormAvailable: false,
+                socialLinksAvailable: false
+            }
+        };
+    }
+    
+    let originalUrl = websiteUrl.trim();
+    let domain = originalUrl.replace(/^(https?:\/\/)?(www\.)?/, '').split('/')[0];
+    
+    const result = {
+        emails: [],
+        phones: [],
+        socials: {
+            instagram: null,
+            facebook: null,
+            linkedin: null,
+            twitter: null,
+            youtube: null,
+            tiktok: null,
+            pinterest: null
+        },
+        websiteAnalysis: {
+            reachable: false,
+            httpsEnabled: false,
+            redirectStatus: 'no_redirect',
+            sslValid: false,
+            mobileFriendly: false,
+            contactPageExists: false,
+            contactFormAvailable: false,
+            socialLinksAvailable: false
+        }
+    };
+
+    const foundEmails = new Set();
+    const foundPhones = new Set();
+    const pagesToFetch = new Set();
+
+    function isMobileFriendly(html) {
+        return /<meta[^>]+name=["']viewport["'][^>]*>/i.test(html) && /width=device-width/i.test(html);
+    }
+
+    function hasContactForm(html) {
+        return /<form[^>]*>/i.test(html) || /class=["'][^"']*form[^"']*["']/i.test(html) || /id=["'][^"']*form[^"']*["']/i.test(html);
+    }
+
+    function extractSocials(html) {
+        const linkRegex = /href=["'](https?:\/\/[^"']+)["']/gi;
+        let match;
+        while ((match = linkRegex.exec(html)) !== null) {
+            const href = match[1];
+            const lowerHref = href.toLowerCase();
+            if (lowerHref.includes('instagram.com/') && !result.socials.instagram) {
+                result.socials.instagram = href;
+            } else if (lowerHref.includes('facebook.com/') && !result.socials.facebook) {
+                result.socials.facebook = href;
+            } else if (lowerHref.includes('linkedin.com/') && !result.socials.linkedin) {
+                result.socials.linkedin = href;
+            } else if ((lowerHref.includes('twitter.com/') || lowerHref.includes('x.com/')) && !result.socials.twitter) {
+                result.socials.twitter = href;
+            } else if (lowerHref.includes('youtube.com/') && !result.socials.youtube) {
+                result.socials.youtube = href;
+            } else if (lowerHref.includes('tiktok.com/') && !result.socials.tiktok) {
+                result.socials.tiktok = href;
+            } else if (lowerHref.includes('pinterest.com/') && !result.socials.pinterest) {
+                result.socials.pinterest = href;
+            }
+        }
+    }
+
+    function extractFromHtml(html, pageUrl) {
+        if (isMobileFriendly(html)) {
+            result.websiteAnalysis.mobileFriendly = true;
+        }
+
+        if (hasContactForm(html)) {
+            result.websiteAnalysis.contactFormAvailable = true;
+        }
+
+        extractSocials(html);
+
+        const mailtoMatch = html.match(/href="mailto:([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,10})/gi);
+        if (mailtoMatch) {
+            mailtoMatch.forEach(m => {
+                const email = m.replace('href="mailto:', '').trim().toLowerCase();
+                if (isValidEmail(email)) foundEmails.add(email);
+            });
+        }
+        
+        const telMatch = html.match(/href="tel:([^"']+)"/gi);
+        if (telMatch) {
+            telMatch.forEach(t => {
+                const phone = t.replace('href="tel:', '').replace('"', '').trim();
+                const normalized = phone.replace(/[^\d+]/g, '');
+                if (normalized.length >= 7 && normalized.length <= 15) {
+                    foundPhones.add(phone);
+                }
+            });
+        }
+        
+        const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,10}/g;
+        const rawEmails = html.match(emailRegex);
+        if (rawEmails) {
+            rawEmails.forEach(e => {
+                const email = e.trim().toLowerCase();
+                if (isValidEmail(email)) foundEmails.add(email);
+            });
+        }
+        
+        const phoneRegex = /(?:\+?\d{1,3}[\s.-]*)?\(?\d{2,4}\)?[\s.-]*\d{3,4}[\s.-]*\d{4}/g;
+        const rawPhones = html.match(phoneRegex);
+        if (rawPhones) {
+            rawPhones.forEach(p => {
+                const phone = p.trim();
+                const digits = phone.replace(/\D/g, '');
+                if (digits.length >= 7 && digits.length <= 15 && !phone.includes('@')) {
+                    foundPhones.add(phone);
+                }
+            });
+        }
+        
+        try {
+            const baseObj = new URL(pageUrl);
+            const linkRegex = /href="([^"]+)"/gi;
+            let match;
+            while ((match = linkRegex.exec(html)) !== null) {
+                const href = match[1].trim();
+                if (/contact|about|support|help|footer/i.test(href)) {
+                    let absoluteUrl = href;
+                    if (href.startsWith('/')) {
+                        absoluteUrl = `${baseObj.origin}${href}`;
+                    } else if (!href.startsWith('http')) {
+                        absoluteUrl = `${baseObj.origin}/${href}`;
+                    }
+                    
+                    try {
+                        const testObj = new URL(absoluteUrl);
+                        if (testObj.hostname === baseObj.hostname) {
+                            pagesToFetch.add(absoluteUrl);
+                            result.websiteAnalysis.contactPageExists = true;
+                        }
+                    } catch {}
+                }
+            }
+        } catch {}
+    }
+
+    function isValidEmail(email) {
+        if (!email || !email.includes('@')) return false;
+        
+        const fileExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.css', '.js', '.svg', '.pdf'];
+        if (fileExtensions.some(ext => email.endsWith(ext))) return false;
+        
+        const junkDomains = [
+            'sentry.io', 'google.com', 'facebook.com', 'twitter.com', 'instagram.com', 
+            'youtube.com', 'linkedin.com', 'pinterest.com', 'schema.org', 'w3.org', 
+            'wordpress.org', 'bootstrap', 'jquery', 'cloudflare', 'analytics', 
+            'hosting', 'domain', 'email.com', 'yourname', 'domain.com', 'example.com', 
+            'placeholder', 'test.com', 'logrocket.com', 'bugsnag.com', 'wix.com', 
+            'squarespace.com', 'webflow.com', 'doubleclick.net', 'adroll.com', 
+            'googleadservices.com', 'gravatar.com', 'wp.com', 'git.io'
+        ];
+        
+        const domain = email.split('@')[1];
+        if (!domain) return false;
+        
+        if (junkDomains.some(junk => domain.includes(junk))) return false;
+        
+        const localPart = email.split('@')[0];
+        const junkLocalParts = ['noreply', 'no-reply', 'privacy', 'security', 'billing', 'support', 'abuse', 'webmaster', 'jobs', 'careers'];
+        if (junkLocalParts.some(junk => localPart === junk)) return false;
+        
+        return true;
+    }
+
+    let httpUrl = `http://${domain}`;
+    let finalHtml = '';
+    let finalUrl = '';
+    
+    try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 8000);
+        
+        const response = await fetch(httpUrl, {
+            signal: controller.signal,
+            headers: { 'User-Agent': 'Mozilla/5.0 (compatible; GeoLeadBot/1.0)' }
+        });
+        clearTimeout(timeout);
+        
+        result.websiteAnalysis.reachable = true;
+        finalUrl = response.url;
+        finalHtml = await response.text();
+        
+        if (finalUrl.startsWith('https://')) {
+            result.websiteAnalysis.httpsEnabled = true;
+            result.websiteAnalysis.sslValid = true;
+            result.websiteAnalysis.redirectStatus = 'redirected';
+        } else {
+            result.websiteAnalysis.httpsEnabled = false;
+            result.websiteAnalysis.redirectStatus = 'no_redirect';
+        }
+    } catch (err) {
+        let httpsUrl = `https://${domain}`;
+        try {
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 8000);
+            
+            const response = await fetch(httpsUrl, {
+                signal: controller.signal,
+                headers: { 'User-Agent': 'Mozilla/5.0 (compatible; GeoLeadBot/1.0)' }
+            });
+            clearTimeout(timeout);
+            
+            result.websiteAnalysis.reachable = true;
+            result.websiteAnalysis.httpsEnabled = true;
+            result.websiteAnalysis.sslValid = true;
+            result.websiteAnalysis.redirectStatus = 'no_redirect';
+            finalUrl = response.url;
+            finalHtml = await response.text();
+        } catch (httpsErr) {
+            console.warn(`[GeoLead BG] Direct HTTPS fetch failed for ${domain}:`, httpsErr.message);
+        }
+    }
+    
+    if (result.websiteAnalysis.reachable && finalHtml) {
+        extractFromHtml(finalHtml, finalUrl);
+        
+        const listToFetch = Array.from(pagesToFetch).filter(p => p !== finalUrl).slice(0, 2);
+        for (const subUrl of listToFetch) {
+            try {
+                const controller = new AbortController();
+                const timeout = setTimeout(() => controller.abort(), 5000);
+                
+                const response = await fetch(subUrl, {
+                    signal: controller.signal,
+                    headers: { 'User-Agent': 'Mozilla/5.0 (compatible; GeoLeadBot/1.0)' }
+                });
+                clearTimeout(timeout);
+                
+                if (response.ok) {
+                    const html = await response.text();
+                    extractFromHtml(html, subUrl);
+                }
+            } catch (err) {
+                console.warn(`[GeoLead BG] Subpage fetch failed for ${subUrl}:`, err.message);
+            }
+        }
+    }
+    
+    result.websiteAnalysis.socialLinksAvailable = Object.values(result.socials).some(link => link !== null);
+    
+    result.emails = Array.from(foundEmails);
+    result.phones = Array.from(foundPhones);
+    
+    return result;
+}
+
+// ====== LEAD SCORING UTILITIES ======
+
+export function calculateLeadQualityScore(lead) {
+    let score = 0.0;
+    
+    const hasWebsite = !!lead.website;
+    if (hasWebsite) {
+        score += 1.5;
+        const analysis = lead.websiteAnalysis || {};
+        if (analysis.httpsEnabled || lead.websiteStatus === 'HAS_WEBSITE') {
+            score += 0.5;
+        }
+        if (analysis.sslValid && analysis.reachable) {
+            score += 1.0;
+        }
+    }
+    
+    const hasPhone = !!lead.phone;
+    const hasEmail = (lead.emails && lead.emails.length > 0) || !!lead.email;
+    const hasOwner = !!lead.ownerName;
+    
+    if (hasPhone) score += 1.0;
+    if (hasEmail) score += 1.5;
+    if (hasPhone && hasEmail) score += 0.5;
+    if (hasOwner) score += 0.5;
+    
+    let socialCount = 0;
+    const platforms = ['instagram', 'facebook', 'linkedin', 'twitter', 'youtube', 'tiktok', 'pinterest'];
+    platforms.forEach(p => {
+        if (lead[p]) socialCount++;
+    });
+    if (lead.socials) {
+        platforms.forEach(p => {
+            if (lead.socials[p]) socialCount++;
+        });
+    }
+    score += Math.min(1.5, socialCount * 0.5);
+    
+    const rating = parseFloat(lead.rating);
+    const reviews = parseInt(lead.reviewCount);
+    
+    if (!isNaN(rating) && rating > 0) {
+        score += 0.5;
+        if (rating >= 4.0) score += 0.5;
+    }
+    if (!isNaN(reviews) && reviews > 0) {
+        score += 0.5;
+        if (reviews >= 50) score += 0.5;
+    }
+    
+    const hasAddress = !!lead.address;
+    const hasHours = !!lead.openingHours;
+    const hasServices = lead.services && lead.services.length > 0;
+    
+    if (hasAddress) score += 0.5;
+    if (hasHours) score += 0.5;
+    if (hasServices) score += 0.5;
+    
+    return Math.max(1, Math.min(10, Math.round(score)));
+}
+
+
+export function qualifyLead(lead, qualityScore) {
+    const hasPhone = !!lead.phone;
+    const hasEmail = (lead.emails && lead.emails.length > 0) || !!lead.email;
+    const rating = parseFloat(lead.rating);
+    const reviews = parseInt(lead.reviewCount);
+    
+    if (qualityScore >= 8 || (hasPhone && !isNaN(rating) && rating >= 4.0 && !isNaN(reviews) && reviews >= 5)) {
+        return 'High';
+    } else if (qualityScore >= 5 || (hasPhone || hasEmail)) {
+        return 'Medium';
+    } else {
+        return 'Low';
+    }
 }
 
