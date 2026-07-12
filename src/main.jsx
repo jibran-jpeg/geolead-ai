@@ -47,18 +47,18 @@ const DEFAULT_CATEGORIES = [
   'Hair Salon', 'Hotel', 'Auto Repair', 'Lawyer', 'Real Estate'
 ];
 
-// Lead Scoring Constants
+// Lead Scoring Constants (Optimized for Website Builders/Agencies)
 const calculateLeadQualityScore = (lead) => {
   let score = 0.0;
   
   const hasWebsite = !!lead.website;
-  if (hasWebsite) {
-    score += 1.5;
+  if (!hasWebsite) {
+    // Goldmine target for website design pitching!
+    score += 3.0;
+  } else {
+    // If they have a website, check if it lacks SSL/HTTPS (opportunity to sell SSL)
     const analysis = lead.websiteAnalysis || {};
-    if (analysis.httpsEnabled || lead.websiteStatus === 'HAS_WEBSITE') {
-      score += 0.5;
-    }
-    if (analysis.sslValid && analysis.reachable) {
+    if (!analysis.httpsEnabled || lead.websiteStatus === 'NO_HTTPS') {
       score += 1.0;
     }
   }
@@ -109,18 +109,19 @@ const calculateLeadQualityScore = (lead) => {
 
 
 const qualifyLead = (lead, qualityScore) => {
-  const hasPhone = !!lead.phone;
-  const hasEmail = (lead.emails && lead.emails.length > 0) || !!lead.email;
-  const rating = parseFloat(lead.rating);
-  const reviews = parseInt(lead.reviewCount);
-  
-  if (qualityScore >= 8 || (hasPhone && !isNaN(rating) && rating >= 4.0 && !isNaN(reviews) && reviews >= 5)) {
-    return 'High';
-  } else if (qualityScore >= 5 || (hasPhone || hasEmail)) {
-    return 'Medium';
-  } else {
-    return 'Low';
+  const hasWebsite = !!lead.website;
+  if (!hasWebsite) {
+    return 'High'; // Goldmine lead for a website builder!
   }
+  
+  // If they have a website but it lacks SSL/HTTPS, it is a Medium opportunity
+  const analysis = lead.websiteAnalysis || {};
+  const hasNoSsl = !analysis.httpsEnabled || lead.websiteStatus === 'NO_HTTPS';
+  if (hasNoSsl) {
+    return 'Medium';
+  }
+  
+  return 'Low';
 };
 
 const calculateLeadScore = (lead) => {

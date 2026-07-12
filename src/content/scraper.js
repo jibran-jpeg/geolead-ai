@@ -720,13 +720,23 @@
             maxPossibleScore += 0.20;
             if (!emailValidation.valid) recommendations.push('Add email address to improve lead quality');
             
-            // Website scoring (10% weight)
+            // Website scoring (10% weight) - Optimized for Website Builders
             const hasWebsite = !!lead.website;
-            const websiteScore = hasWebsite ? 0.7 : 0;
+            const websiteScore = !hasWebsite ? 1.0 : 0.0;
             breakdown.website = { score: websiteScore, hasWebsite: hasWebsite };
             totalScore += websiteScore * 0.10;
             maxPossibleScore += 0.10;
-            if (!hasWebsite) recommendations.push('Create a business website to improve lead quality');
+            if (hasWebsite) {
+                const analysis = lead.websiteAnalysis || {};
+                const hasNoSsl = !analysis.httpsEnabled || lead.websiteStatus === 'NO_HTTPS';
+                if (hasNoSsl) {
+                    recommendations.push('Website lacks SSL/HTTPS - Opportunity to sell SSL/security migration.');
+                } else {
+                    recommendations.push('Lead already has a secured website.');
+                }
+            } else {
+                recommendations.push('No website detected - Perfect prospect for web design outreach!');
+            }
             
             // Rating scoring (10% weight)
             const rating = parseFloat(lead.rating) || 0;
@@ -764,8 +774,9 @@
             // Normalize to 1-10 scale
             const normalizedScore = Math.min(10, Math.max(1, (totalScore / maxPossibleScore) * 10));
             
-            // Determine priority classification
-            const priority = normalizedScore >= 7 ? 'High' : normalizedScore >= 4 ? 'Medium' : 'Low';
+            // Determine priority classification - Optimized for Website Builders
+            const isNoSsl = hasWebsite && (lead.websiteStatus === 'NO_HTTPS' || (lead.websiteAnalysis && !lead.websiteAnalysis.httpsEnabled));
+            const priority = !hasWebsite ? 'High' : isNoSsl ? 'Medium' : 'Low';
             
             return {
                 score: Math.round(normalizedScore * 10) / 10,
