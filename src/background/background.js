@@ -342,7 +342,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             
             // Keep backward compatibility with old scrapeStatus
             state.scrapeStatus = 'scraping';
-            state.scrapeProgress = { found: message.found, total: message.total };
+            state.scrapeProgress = { 
+                found: message.found, 
+                total: message.total,
+                statusText: message.statusText || 'Scraping...',
+                currentBusinessName: message.currentBusinessName || '',
+                processedCount: message.processedCount || message.found,
+                detectedCount: message.detectedCount || message.total
+            };
             
             return { ...state, sessions };
         });

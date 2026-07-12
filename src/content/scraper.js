@@ -237,13 +237,14 @@
             const scrapedLeads = [];
             currentFound = 0;
             currentTarget = maxResults;
+            let processedCount = 0;
 
             let scrollAttempt = 0;
             let stallCount = 0;
             const MAX_SCROLL_ATTEMPTS = 100;
 
             // Send initial progress
-            sendProgress(0, maxResults);
+            sendProgress(0, maxResults, 'Initializing Scraper...', '', 0, findBusinessCards().length);
 
             // Dynamic card processing loop
             while (currentFound < maxResults && !shouldStop) {
@@ -284,6 +285,7 @@
                     }
 
                     console.log('[GeoLead] 📜 Scrolling feed down to load more listings...');
+                    sendProgress(scrapedLeads.length, maxResults, 'Scrolling Feed...', '', processedCount, findBusinessCards().length);
                     const prevCardCount = cards.length;
                     scrollContainer.scrollBy({ top: 800, behavior: 'smooth' });
                     scrollAttempt++;
@@ -306,6 +308,7 @@
                 // We have a valid unprocessed card!
                 console.log(`[GeoLead DEBUG] Business card detected: "${nextBusinessName}", URL: "${nextPlaceUrl}"`);
                 processedPlaceUrls.add(nextPlaceUrl);
+                sendProgress(scrapedLeads.length, maxResults, 'Opening Business...', nextBusinessName, processedCount, findBusinessCards().length);
 
                 // Try to click and scrape the details
                 let success = false;
@@ -323,11 +326,13 @@
 
                         // Wait for details panel and verify correct business
                         console.log(`[GeoLead DEBUG] Waiting for detail panel to load for: "${nextBusinessName}"...`);
+                        sendProgress(scrapedLeads.length, maxResults, 'Loading Details...', nextBusinessName, processedCount, findBusinessCards().length);
                         const correctPanel = await waitForCorrectDetailPanel(nextBusinessName, 6000);
                         if (!correctPanel) {
                             throw new Error(`Detail panel title did not match expected business: ${nextBusinessName}`);
                         }
                         console.log(`[GeoLead DEBUG] Detail panel loaded & verified for: "${nextBusinessName}"`);
+                        sendProgress(scrapedLeads.length, maxResults, 'Extracting Details...', nextBusinessName, processedCount, findBusinessCards().length);
 
                         // Wait for info section to render
                         await sleep(500);
@@ -517,6 +522,8 @@
                     if (lead.businessName && !duplicateDetection.isDuplicate(lead, scrapedLeads)) {
                         if (onlyWithoutWebsite && (lead.website || lead.websiteStatus === 'HAS_WEBSITE')) {
                             console.log(`[GeoLead DEBUG] Skipped "${lead.businessName}" because it has a website.`);
+                            processedCount++;
+                            sendProgress(scrapedLeads.length, maxResults, 'Filtering (Has Website)...', nextBusinessName, processedCount, findBusinessCards().length);
                         } else {
                             scrapedLeads.push(lead);
                             currentFound = scrapedLeads.length;
@@ -548,16 +555,22 @@
                             } catch (msgErr) {
                                 console.error('[GeoLead DEBUG] Verification messaging error:', msgErr);
                             }
+                            processedCount++;
+                            sendProgress(scrapedLeads.length, maxResults, 'Saving Lead...', nextBusinessName, processedCount, findBusinessCards().length);
                         }
                     } else {
                         console.log(`[GeoLead DEBUG] Skipped duplicate lead: "${lead.businessName}"`);
+                        processedCount++;
+                        sendProgress(scrapedLeads.length, maxResults, 'Filtering (Duplicate)...', nextBusinessName, processedCount, findBusinessCards().length);
                     }
                 } else {
                     console.error(`[GeoLead DEBUG] Failed to scrape business "${nextBusinessName}" after 3 retries. Skipping.`);
+                    processedCount++;
+                    sendProgress(scrapedLeads.length, maxResults, 'Skipped (Unavailable)...', nextBusinessName, processedCount, findBusinessCards().length);
                 }
 
                 // Send progress update to UI
-                sendProgress(scrapedLeads.length, maxResults);
+                sendProgress(scrapedLeads.length, maxResults, 'Extracting...', '', processedCount, findBusinessCards().length);
             }
 
             console.log('[GeoLead] Dynamic scraping loop finished.');
@@ -2934,12 +2947,16 @@
 
     // ====== MESSAGE HELPERS ======
 
-    function sendProgress(found, total) {
+    function sendProgress(found, total, statusText = 'Scraping...', currentBusinessName = '', processedCount = 0, detectedCount = 0) {
         try {
             chrome.runtime.sendMessage({
                 type: MSG.SCRAPE_PROGRESS,
                 found,
                 total,
+                statusText,
+                currentBusinessName,
+                processedCount,
+                detectedCount,
                 sessionId: currentSessionId
             });
         } catch (e) {

@@ -1205,6 +1205,22 @@ body {
   50% { opacity: 0.4; }
 }
 
+@keyframes ping {
+  75%, 100% {
+    transform: scale(2.2);
+    opacity: 0;
+  }
+}
+
+@keyframes skeletonShimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
 .fade-in {
   animation: fadeIn 0.2s ease-out;
 }

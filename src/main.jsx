@@ -1387,29 +1387,102 @@ const App = () => {
 
                 {/* Scraper Status Panel */}
                 <div className="card-premium">
-                  {state.scrapeStatus === 'scraping' ? (
-                    <div className="progress-panel">
-                      <div className="progress-header">
-                        <span style={{ fontWeight: 600, color: 'var(--primary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                          <RefreshCw size={14} className="pulse-glow" style={{ animation: 'spin 2s linear infinite' }} />
-                          Scraping Google Maps...
-                        </span>
-                        <span style={{ fontWeight: 600 }}>
-                          {state.scrapeProgress.found} / {state.scrapeProgress.total} Leads
-                        </span>
+                  {state.scrapeStatus === 'scraping' ? (() => {
+                    const progress = state.scrapeProgress || { found: 0, total: state.settings?.scrollDepth || 20, statusText: 'Initializing...', currentBusinessName: '', processedCount: 0, detectedCount: 0 };
+                    const found = progress.found || 0;
+                    const total = progress.total || state.settings?.scrollDepth || 20;
+                    const percent = Math.min(100, Math.round((found / total) * 100));
+                    return (
+                      <div className="progress-panel" style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                        {/* Active header with animated state indicator */}
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                          <span style={{ fontWeight: 600, color: 'var(--primary)', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px' }}>
+                            <span style={{ position: 'relative', display: 'flex', height: '8px', width: '8px' }}>
+                              <span style={{ animation: 'ping 1.5s cubic-bezier(0, 0, 0.2, 1) infinite', position: 'absolute', display: 'inline-flex', height: '100%', width: '100%', borderRadius: '9999px', backgroundColor: 'var(--primary)', opacity: 0.75 }}></span>
+                              <span style={{ position: 'relative', display: 'inline-flex', borderRadius: '9999px', height: '8px', width: '8px', backgroundColor: 'var(--primary)' }}></span>
+                            </span>
+                            {progress.statusText || 'Scraping Google Maps...'}
+                          </span>
+                          <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--primary)', background: 'var(--primary-glow)', padding: '2px 8px', borderRadius: '12px', border: '1px solid rgba(59, 130, 246, 0.15)' }}>
+                            {percent}%
+                          </span>
+                        </div>
+
+                        {/* Skeleton loader / pulsing glow for current business */}
+                        <div style={{
+                          background: 'rgba(255, 255, 255, 0.02)',
+                          border: '1px solid var(--border-color)',
+                          borderRadius: 'var(--radius-sm)',
+                          padding: '10px 12px',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '6px',
+                          position: 'relative',
+                          overflow: 'hidden'
+                        }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <Building size={12} style={{ color: 'var(--text-secondary)' }} />
+                            <span style={{ fontSize: '10px', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600 }}>Current Business</span>
+                          </div>
+                          {progress.currentBusinessName ? (
+                            <div style={{ 
+                              fontSize: '13px', 
+                              fontWeight: 700, 
+                              color: 'var(--text-primary)',
+                              whiteSpace: 'nowrap',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              animation: 'pulseGlow 2s infinite ease-in-out'
+                            }}>
+                              {progress.currentBusinessName}
+                            </div>
+                          ) : (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', width: '100%', padding: '2px 0' }}>
+                              <div className="skeleton-line" style={{ height: '12px', width: '70%', background: 'linear-gradient(90deg, rgba(255,255,255,0.03) 25%, rgba(255,255,255,0.08) 50%, rgba(255,255,255,0.03) 75%)', backgroundSize: '200% 100%', borderRadius: '3px', animation: 'skeletonShimmer 1.5s infinite linear' }}></div>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Smooth Progress Bar */}
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                          <div className="progress-track" style={{ height: '6px', borderRadius: '3px', background: 'rgba(255,255,255,0.05)', overflow: 'hidden' }}>
+                            <div 
+                              className="progress-fill" 
+                              style={{ 
+                                height: '100%',
+                                width: `${percent}%`,
+                                background: 'var(--primary)',
+                                boxShadow: '0 0 8px var(--primary)',
+                                transition: 'width 0.5s cubic-bezier(0.4, 0, 0.2, 1)'
+                              }}
+                            ></div>
+                          </div>
+                        </div>
+
+                        {/* Grid Stats */}
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                          <div style={{ background: 'rgba(255, 255, 255, 0.01)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-sm)', padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: '2px', textAlign: 'left' }}>
+                            <span style={{ fontSize: '9.5px', color: 'var(--text-secondary)', fontWeight: 500 }}>Leads Collected</span>
+                            <span style={{ fontSize: '15px', fontWeight: 800, color: 'var(--success)' }}>
+                              {found} <span style={{ fontSize: '11px', fontWeight: 500, color: 'var(--text-muted)' }}>/ {total}</span>
+                            </span>
+                          </div>
+                          <div style={{ background: 'rgba(255, 255, 255, 0.01)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-sm)', padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: '2px', textAlign: 'left' }}>
+                            <span style={{ fontSize: '9.5px', color: 'var(--text-secondary)', fontWeight: 500 }}>Processed / Detected</span>
+                            <span style={{ fontSize: '15px', fontWeight: 800, color: 'var(--text-primary)' }}>
+                              {progress.processedCount || found} <span style={{ fontSize: '11px', fontWeight: 500, color: 'var(--text-muted)' }}>/ {progress.detectedCount || total}</span>
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Stop Extraction Button */}
+                        <button className="btn-secondary" style={{ borderColor: 'rgba(244, 63, 94, 0.4)', color: 'var(--danger)', width: '100%', marginTop: '2px' }} onClick={handleStopScrape}>
+                          <Square size={13} fill="var(--danger)" />
+                          Stop Extraction
+                        </button>
                       </div>
-                      <div className="progress-track">
-                        <div 
-                          className="progress-fill" 
-                          style={{ width: `${Math.min(100, (state.scrapeProgress.found / state.scrapeProgress.total) * 100)}%` }}
-                        ></div>
-                      </div>
-                      <button className="btn-secondary" style={{ borderColor: 'rgba(244, 63, 94, 0.4)', color: 'var(--danger)' }} onClick={handleStopScrape}>
-                        <Square size={13} fill="var(--danger)" />
-                        Stop Extraction
-                      </button>
-                    </div>
-                  ) : (
+                    );
+                  })() : (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                       {state.scrapeStatus === 'done' && (
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--success)', fontWeight: 500, marginBottom: '4px' }}>
@@ -1428,71 +1501,6 @@ const App = () => {
                       </button>
                     </div>
                   )}
-                </div>
-
-                {/* Real-time System Console */}
-                <div className="card-premium" style={{ marginBottom: 0 }}>
-                  <div className="card-header-row" style={{ marginBottom: '8px' }}>
-                    <span className="card-title">System Console</span>
-                    <span className="badge-premium badge-info" style={{ textTransform: 'none' }}>
-                      {state.scrapeStatus === 'scraping' ? 'Active' : 'Idle'}
-                    </span>
-                  </div>
-                  <div 
-                    style={{ 
-                      background: 'rgba(5, 5, 5, 0.8)', 
-                      borderRadius: 'var(--radius-sm)', 
-                      border: '1px solid var(--border-color)', 
-                      padding: '10px', 
-                      fontFamily: 'monospace', 
-                      fontSize: '10.5px', 
-                      color: 'var(--text-secondary)',
-                      height: '110px',
-                      overflowY: 'auto',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: '4px',
-                      lineHeight: '1.4'
-                    }}
-                  >
-                    {state.scrapeStatus === 'idle' && (
-                      <>
-                        <div style={{ color: 'var(--success)' }}>&gt; System status: Ready</div>
-                        <div>&gt; Awaiting search query on active Google Maps tab...</div>
-                        <div style={{ color: 'var(--text-muted)' }}>&gt; [Tip] Open Google Maps, search, and click Start.</div>
-                      </>
-                    )}
-                    {state.scrapeStatus === 'scraping' && (
-                      <>
-                        <div style={{ color: 'var(--info)' }}>&gt; Scraping pipeline active...</div>
-                        <div>&gt; target_limit: {state.settings.scrollDepth} leads</div>
-                        <div>&gt; scrape_speed: {state.settings.scrapeSpeed}</div>
-                        <div style={{ color: 'var(--warning)', animation: 'pulseGlow 1.5s infinite ease-in-out' }}>
-                          &gt; Extracting: {state.scrapeProgress.found} leads collected
-                        </div>
-                      </>
-                    )}
-                    {state.scrapeStatus === 'done' && (
-                      <>
-                        <div style={{ color: 'var(--success)' }}>&gt; Scraping completed successfully!</div>
-                        <div>&gt; Extracted unique B2B leads.</div>
-                        <div style={{ color: 'var(--info)' }}>&gt; Next steps: Go to "Leads" tab to review & export.</div>
-                      </>
-                    )}
-                    {state.scrapeStatus === 'error' && (
-                      <>
-                        <div style={{ color: 'var(--danger)' }}>&gt; ERROR: Scraping execution halted.</div>
-                        <div style={{ color: 'var(--danger)' }}>&gt; Details: {state.scrapeError || 'Unknown connection error.'}</div>
-                      </>
-                    )}
-                    {state.enrichProgress.isEnriching && (
-                      <>
-                        <div style={{ color: 'var(--info)' }}>&gt; Enrichment Agent: Active</div>
-                        <div>&gt; Progress: {state.enrichProgress.completed} / {state.enrichProgress.total}</div>
-                        <div style={{ color: 'var(--warning)' }}>&gt; Currently parsing: {state.enrichProgress.currentLead}</div>
-                      </>
-                    )}
-                  </div>
                 </div>
               </>
             )}
