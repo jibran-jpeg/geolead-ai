@@ -323,7 +323,10 @@
                         await sleep(500);
 
                         // Scroll DOWN inside detail panel to trigger lazy loads
-                        const detailScroll = document.querySelector('.m6QErb.DxyBCb.kA9KIf.dS8AEf, .m6QErb.WNBkOb, .bJzME, div[role="main"]');
+                        const detailContainer = getDetailPanelContainer();
+                        const detailScroll = (detailContainer && detailContainer !== document)
+                            ? (detailContainer.querySelector('.m6QErb.dS8AEf, .m6QErb.WNBkOb') || detailContainer)
+                            : document.querySelector('.m6QErb.DxyBCb.kA9KIf.dS8AEf, .m6QErb.WNBkOb, .bJzME, div[role="main"]');
                         if (detailScroll) {
                             detailScroll.scrollBy({ top: 400, behavior: 'smooth' });
                             await sleep(300);

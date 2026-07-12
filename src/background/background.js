@@ -357,6 +357,24 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             if (sessionId && sessions[sessionId]) {
                 // Add leads to current session
                 const session = sessions[sessionId];
+                if (!session.leads) session.leads = [];
+                if (!session.metadata) {
+                    session.metadata = {
+                        targetLeads: 30,
+                        leadsCollected: 0,
+                        businessesVisited: 0,
+                        scrapingDuration: 0,
+                        duplicatesRemoved: 0
+                    };
+                }
+                if (!session.pagination) {
+                    session.pagination = {
+                        currentPage: 1,
+                        leadsPerPage: 50,
+                        totalPages: 1
+                    };
+                }
+
                 const newLeads = message.leads || [];
                 const existingLeads = session.leads || [];
                 
