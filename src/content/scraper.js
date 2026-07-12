@@ -697,93 +697,118 @@
     // Lead scoring utilities
     const scoringUtils = {
         calculateLeadQualityScore: function(lead) {
-            if (!lead) return { score: 0, breakdown: {}, recommendations: [], valid: false };
+            if (!lead) return { score: 1, breakdown: {}, recommendations: [], valid: false };
             
             let totalScore = 0;
-            let maxPossibleScore = 0;
             const breakdown = {};
             const recommendations = [];
             
-            // Phone scoring (15% weight)
-            const phoneValidation = validationUtils.validatePhoneNumber(lead.phone);
-            const phoneScore = phoneValidation.valid ? 0.8 : 0.2;
-            breakdown.phone = { score: phoneScore, hasPhone: phoneValidation.valid };
-            totalScore += phoneScore * 0.15;
-            maxPossibleScore += 0.15;
-            if (!phoneValidation.valid) recommendations.push('Add phone number to improve lead quality');
-            
-            // Email scoring (20% weight)
-            const emailValidation = validationUtils.validateEmail(lead.email, lead.website);
-            const emailScore = emailValidation.valid ? 0.9 : 0.1;
-            breakdown.email = { score: emailScore, hasEmail: emailValidation.valid };
-            totalScore += emailScore * 0.20;
-            maxPossibleScore += 0.20;
-            if (!emailValidation.valid) recommendations.push('Add email address to improve lead quality');
-            
-            // Website scoring (10% weight) - Optimized for Website Builders
+            // 1. Website Status & Pitch Angle (Max 4.0 points)
             const hasWebsite = !!lead.website;
-            const websiteScore = !hasWebsite ? 1.0 : 0.0;
-            breakdown.website = { score: websiteScore, hasWebsite: hasWebsite };
-            totalScore += websiteScore * 0.10;
-            maxPossibleScore += 0.10;
-            if (hasWebsite) {
+            let websitePoints = 0;
+            if (!hasWebsite) {
+                websitePoints = 4.0;
+                recommendations.push('No website detected - Perfect prospect for web design outreach!');
+            } else {
                 const analysis = lead.websiteAnalysis || {};
                 const hasNoSsl = !analysis.httpsEnabled || lead.websiteStatus === 'NO_HTTPS';
                 if (hasNoSsl) {
+                    websitePoints = 1.5;
                     recommendations.push('Website lacks SSL/HTTPS - Opportunity to sell SSL/security migration.');
                 } else {
                     recommendations.push('Lead already has a secured website.');
                 }
-            } else {
-                recommendations.push('No website detected - Perfect prospect for web design outreach!');
+            }
+            breakdown.website = { score: websitePoints, hasWebsite };
+            totalScore += websitePoints;
+            
+            // 2. Financial Capacity / Local Activity (Max 2.5 points)
+            const rating = parseFloat(lead.rating);
+            const reviews = parseInt(lead.reviewCount);
+            let ratingPoints = 0;
+            let reviewPoints = 0;
+            
+            if (!isNaN(rating)) {
+                if (rating >= 4.0) ratingPoints = 1.0;
+                else if (rating >= 3.0) ratingPoints = 0.5;
+            }
+            if (rating < 3.0 && !isNaN(rating)) {
+                recommendations.push('Low customer rating - Opportunity to pitch reputation management.');
             }
             
-            // Rating scoring (10% weight)
-            const rating = parseFloat(lead.rating) || 0;
-            const ratingScore = Math.min(1, rating / 5);
-            breakdown.rating = { score: ratingScore, rating: rating };
-            totalScore += ratingScore * 0.10;
-            maxPossibleScore += 0.10;
-            if (rating < 3.0) recommendations.push('Improve customer rating to increase lead quality');
+            if (!isNaN(reviews) && reviews > 0) {
+                if (reviews > 100) reviewPoints = 1.5;
+                else if (reviews >= 20) reviewPoints = 1.0;
+                else reviewPoints = 0.5;
+            }
+            if (reviews < 20 || isNaN(reviews)) {
+                recommendations.push('Low review count - Recommend review collection campaign.');
+            }
             
-            // Review count scoring (10% weight)
-            const reviews = parseInt(lead.reviewCount) || 0;
-            const reviewScore = Math.min(1, Math.log10(reviews + 1) / 3);
-            breakdown.reviews = { score: reviewScore, reviewCount: reviews };
-            totalScore += reviewScore * 0.10;
-            maxPossibleScore += 0.10;
-            if (reviews < 20) recommendations.push('Increase customer reviews to improve lead quality');
+            breakdown.rating = { score: ratingPoints, rating };
+            breakdown.reviews = { score: reviewPoints, reviewCount: reviews };
+            totalScore += ratingPoints + reviewPoints;
             
-            // Social media scoring (15% weight)
-            const socialPlatforms = ['facebook', 'instagram', 'linkedin', 'twitter', 'youtube', 'tiktok', 'pinterest'];
-            const socialCount = socialPlatforms.filter(platform => lead[platform]).length;
-            const socialScore = socialCount / socialPlatforms.length;
-            breakdown.socialMedia = { score: socialScore, platformCount: socialCount };
-            totalScore += socialScore * 0.15;
-            maxPossibleScore += 0.15;
-            if (socialCount === 0) recommendations.push('Create social media profiles to increase online presence');
+            // 3. Marketing Intent / Online Awareness (Max 2.0 points)
+            let socialCount = 0;
+            const platforms = ['instagram', 'facebook', 'linkedin', 'twitter', 'youtube', 'tiktok', 'pinterest'];
+            platforms.forEach(p => {
+                if (lead[p]) socialCount++;
+            });
+            if (lead.socials) {
+                platforms.forEach(p => {
+                    if (lead.socials[p]) socialCount++;
+                });
+            }
             
-            // Business status scoring (10% weight)
-            const isOpen = lead.businessStatus === 'Open' || !lead.businessStatus;
-            const statusScore = isOpen ? 1 : 0;
-            breakdown.businessStatus = { score: statusScore, isOpen: isOpen };
-            totalScore += statusScore * 0.10;
-            maxPossibleScore += 0.10;
-            if (!isOpen) recommendations.push('Update business status to open to improve lead quality');
+            let socialPoints = 0;
+            if (socialCount >= 3) socialPoints = 2.0;
+            else if (socialCount === 2) socialPoints = 1.0;
+            else if (socialCount === 1) socialPoints = 0.5;
             
-            // Normalize to 1-10 scale
-            const normalizedScore = Math.min(10, Math.max(1, (totalScore / maxPossibleScore) * 10));
+            if (socialCount > 0 && !hasWebsite) {
+                recommendations.push(`Active on social media (${socialCount} profiles) but has no website. Pitch social-to-web funnel integration.`);
+            } else if (socialCount === 0) {
+                recommendations.push('No social profiles found - Pitch social media setup packages.');
+            }
             
-            // Determine priority classification - Optimized for Website Builders
+            breakdown.socialMedia = { score: socialPoints, platformCount: socialCount };
+            totalScore += socialPoints;
+            
+            // 4. Contact Accessibility (Max 1.5 points)
+            const hasPhone = !!lead.phone;
+            const hasEmail = (lead.emails && lead.emails.length > 0) || !!lead.email;
+            let contactPoints = 0;
+            
+            if (hasPhone && hasEmail) {
+                contactPoints = 1.5;
+                recommendations.push('Excellent outreach potential - both phone and email details are available.');
+            } else if (hasEmail) {
+                contactPoints = 0.75;
+                recommendations.push('Contact via email address.');
+            } else if (hasPhone) {
+                contactPoints = 0.5;
+                recommendations.push('Contact via phone number.');
+            } else {
+                recommendations.push('No direct contact info found - Recommend manual verification.');
+            }
+            
+            breakdown.contact = { score: contactPoints, hasPhone, hasEmail };
+            totalScore += contactPoints;
+            
+            // Normalize and clamp between 1.0 and 10.0
+            const finalScore = Math.max(1, Math.min(10, Math.round(totalScore * 10) / 10));
+            
+            // Determine priority classification
             const isNoSsl = hasWebsite && (lead.websiteStatus === 'NO_HTTPS' || (lead.websiteAnalysis && !lead.websiteAnalysis.httpsEnabled));
             const priority = !hasWebsite ? 'High' : isNoSsl ? 'Medium' : 'Low';
             
             return {
-                score: Math.round(normalizedScore * 10) / 10,
+                score: finalScore,
                 breakdown: breakdown,
                 recommendations: recommendations,
                 priority: priority,
-                maxPossibleScore: maxPossibleScore,
+                maxPossibleScore: 10,
                 rawScore: totalScore,
                 valid: true
             };

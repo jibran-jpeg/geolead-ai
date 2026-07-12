@@ -47,31 +47,44 @@ const DEFAULT_CATEGORIES = [
   'Hair Salon', 'Hotel', 'Auto Repair', 'Lawyer', 'Real Estate'
 ];
 
-// Lead Scoring Constants (Optimized for Website Builders/Agencies)
+// Upgraded 10-Point Lead Quality Scoring Model (Optimized for Website Builders & Agencies)
 const calculateLeadQualityScore = (lead) => {
+  if (!lead) return 1;
+  
   let score = 0.0;
   
+  // 1. Website Status & Pitch Angle (Max 4.0 points)
   const hasWebsite = !!lead.website;
   if (!hasWebsite) {
-    // Goldmine target for website design pitching!
-    score += 3.0;
+    // Goldmine target: completely lacks a web presence
+    score += 4.0;
   } else {
-    // If they have a website, check if it lacks SSL/HTTPS (opportunity to sell SSL)
+    // Check if website has security / SSL issues
     const analysis = lead.websiteAnalysis || {};
-    if (!analysis.httpsEnabled || lead.websiteStatus === 'NO_HTTPS') {
-      score += 1.0;
+    const hasNoSsl = !analysis.httpsEnabled || lead.websiteStatus === 'NO_HTTPS';
+    if (hasNoSsl) {
+      score += 1.5; // Pitch SSL security and optimization
     }
   }
   
-  const hasPhone = !!lead.phone;
-  const hasEmail = (lead.emails && lead.emails.length > 0) || !!lead.email;
-  const hasOwner = !!lead.ownerName;
+  // 2. Financial Capacity / Local Activity (Max 2.5 points)
+  // Higher rating and review count means the business is active, successful, and has budget
+  const rating = parseFloat(lead.rating);
+  const reviews = parseInt(lead.reviewCount);
   
-  if (hasPhone) score += 1.0;
-  if (hasEmail) score += 1.5;
-  if (hasPhone && hasEmail) score += 0.5;
-  if (hasOwner) score += 0.5;
+  if (!isNaN(rating)) {
+    if (rating >= 4.0) score += 1.0;
+    else if (rating >= 3.0) score += 0.5;
+  }
   
+  if (!isNaN(reviews) && reviews > 0) {
+    if (reviews > 100) score += 1.5;
+    else if (reviews >= 20) score += 1.0;
+    else score += 0.5;
+  }
+  
+  // 3. Marketing Intent / Online Awareness (Max 2.0 points)
+  // Active social media profiles indicate they care about digital presence
   let socialCount = 0;
   const platforms = ['instagram', 'facebook', 'linkedin', 'twitter', 'youtube', 'tiktok', 'pinterest'];
   platforms.forEach(p => {
@@ -82,29 +95,21 @@ const calculateLeadQualityScore = (lead) => {
       if (lead.socials[p]) socialCount++;
     });
   }
-  score += Math.min(1.5, socialCount * 0.5);
   
-  const rating = parseFloat(lead.rating);
-  const reviews = parseInt(lead.reviewCount);
+  if (socialCount >= 3) score += 2.0;
+  else if (socialCount === 2) score += 1.0;
+  else if (socialCount === 1) score += 0.5;
   
-  if (!isNaN(rating) && rating > 0) {
-    score += 0.5;
-    if (rating >= 4.0) score += 0.5;
-  }
-  if (!isNaN(reviews) && reviews > 0) {
-    score += 0.5;
-    if (reviews >= 50) score += 0.5;
-  }
+  // 4. Contact Accessibility (Max 1.5 points)
+  const hasPhone = !!lead.phone;
+  const hasEmail = (lead.emails && lead.emails.length > 0) || !!lead.email;
   
-  const hasAddress = !!lead.address;
-  const hasHours = !!lead.openingHours;
-  const hasServices = lead.services && lead.services.length > 0;
+  if (hasPhone && hasEmail) score += 1.5;
+  else if (hasEmail) score += 0.75;
+  else if (hasPhone) score += 0.5;
   
-  if (hasAddress) score += 0.5;
-  if (hasHours) score += 0.5;
-  if (hasServices) score += 0.5;
-  
-  return Math.max(1, Math.min(10, Math.round(score)));
+  // Normalize and clamp between 1.0 and 10.0
+  return Math.max(1, Math.min(10, Math.round(score * 10) / 10));
 };
 
 
