@@ -441,10 +441,7 @@ const App = () => {
           loadedState = {
             ...INITIAL_STATE,
             ...result.geolead_state,
-            // Start with sessions list on popup open unless a scrape is currently active
-            currentSessionId: (result.geolead_state.scrapeStatus === 'scraping' && result.geolead_state.activeScrapingSessionId)
-              ? result.geolead_state.activeScrapingSessionId
-              : null,
+            currentSessionId: result.geolead_state.currentSessionId || null,
             settings: {
               ...INITIAL_STATE.settings,
               ...(result.geolead_state.settings || {})
