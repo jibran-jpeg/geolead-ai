@@ -28,6 +28,107 @@
     // KEEP-ALIVE STATE
     let keepAliveInterval = null;
 
+    // ====== NETWORK INTERCEPTOR ======
+    const interceptedPlaces = new Map();
+
+    // Inject interceptor.js into Main World
+    function injectInterceptor() {
+        try {
+            const script = document.createElement('script');
+            script.src = chrome.runtime.getURL('interceptor.js');
+            script.onload = function() {
+                this.remove();
+            };
+            (document.head || document.documentElement).appendChild(script);
+            console.log('✓ GeoLead AI Network Interceptor injected');
+        } catch (e) {
+            console.error('Failed to inject GeoLead AI Interceptor:', e);
+        }
+    }
+
+    // Listen for intercepted network responses
+    window.addEventListener('message', (event) => {
+        if (event.source !== window) return;
+        if (event.data && event.data.type === 'GEOMEAD_API_RESPONSE') {
+            const data = event.data.data;
+            try {
+                if (data && Array.isArray(data)) {
+                    const details = extractDetailsFromRawArray(data);
+                    if (details && details.title) {
+                        const key = details.title.toLowerCase().trim();
+                        interceptedPlaces.set(key, details);
+                        console.log(`[GeoLead] Intercepted API details for: ${details.title}`, details);
+                    }
+                }
+            } catch (e) {
+                console.error('Error parsing intercepted API data:', e);
+            }
+        }
+    });
+
+    function extractDetailsFromRawArray(data) {
+        let title = null;
+        let phone = null;
+        let website = null;
+        let latitude = null;
+        let longitude = null;
+        let plusCode = null;
+
+        // Try direct lookup of name first
+        try {
+            if (data[0] && typeof data[0][1] === 'string') {
+                title = data[0][1];
+            }
+        } catch (e) {}
+
+        // Recursive search for phone, website, coordinates, and plus code
+        function search(val) {
+            if (!val) return;
+            if (typeof val === 'string') {
+                const str = val.trim();
+                if (str.startsWith('http') && !str.includes('google.com') && !str.includes('google.co')) {
+                    website = str;
+                } else if ((str.startsWith('+') || str.startsWith('0')) && str.replace(/[\s\-()]/g, '').length >= 7 && str.replace(/[\s\-()]/g, '').length <= 18) {
+                    if (/^\+?[0-9\s\-()]+$/.test(str)) {
+                        phone = str;
+                    }
+                } else if (/^[A-Z0-9]{4}\+[A-Z0-9]{2,8}\s+.+$/.test(str)) {
+                    plusCode = str;
+                }
+            } else if (typeof val === 'number') {
+                // Keep moving
+            } else if (Array.isArray(val)) {
+                if (val.length === 2 && typeof val[0] === 'number' && typeof val[1] === 'number') {
+                    const lat = val[0];
+                    const lng = val[1];
+                    if (Math.abs(lat) <= 90 && Math.abs(lng) <= 180 && lat !== 0 && lng !== 0 && !Number.isInteger(lat) && !Number.isInteger(lng)) {
+                        latitude = lat;
+                        longitude = lng;
+                    }
+                }
+                for (let i = 0; i < val.length; i++) {
+                    search(val[i]);
+                }
+            } else if (typeof val === 'object') {
+                for (const k in val) {
+                    search(val[k]);
+                }
+            }
+        }
+
+        search(data);
+
+        // Fallback title lookups if direct lookup returned empty
+        if (!title && data && Array.isArray(data)) {
+            try {
+                if (typeof data[6] === 'string') title = data[6];
+                else if (data[0] && typeof data[0][0] === 'string') title = data[0][0];
+            } catch (e) {}
+        }
+
+        return { title, phone, website, latitude, longitude, plusCode };
+    }
+
     function startKeepAlive(source = 'scraper_content') {
         if (keepAliveInterval) clearInterval(keepAliveInterval);
         keepAliveInterval = setInterval(() => {
@@ -347,7 +448,7 @@
                     clickTarget.click();
 
                     // CRITICAL: Wait until the detail panel title matches THIS business
-                    console.log(`[GeoLead] 🏢 Waiting for detail panel for: ${lead.businessName}`);
+console.log(`[GeoLead] 🏢 Waiting for detail panel for: ${lead.businessName}`);
                     const correctPanel = await waitForCorrectDetailPanel(lead.businessName, 5000);
                     if (!correctPanel) {
                         console.log(`[GeoLead] ❌ Wrong/stale panel for: ${lead.businessName} — skipping`);
@@ -357,25 +458,47 @@
                     }
                     console.log(`[GeoLead] ✅ Detail panel loaded for: ${lead.businessName}`);
 
+                    // ====== MERGE INTERCEPTED API DATA ======
+                    const apiDetails = interceptedPlaces.get(lead.businessName.toLowerCase().trim());
+                    if (apiDetails) {
+                        console.log(`[GeoLead] 🚀 Intercepted API data found for: ${lead.businessName}`, apiDetails);
+                        if (apiDetails.phone) {
+                            lead.phone = apiDetails.phone;
+                        }
+                        if (apiDetails.website) {
+                            lead.website = apiDetails.website;
+                            lead.websiteStatus = 'VALID';
+                        }
+                        if (apiDetails.latitude) {
+                            lead.latitude = apiDetails.latitude;
+                            lead.longitude = apiDetails.longitude;
+                        }
+                        if (apiDetails.plusCode) {
+                            lead.plusCode = apiDetails.plusCode;
+                        }
+                    }
+
                     // Wait for info section to fully render
                     console.log(`[GeoLead] ⏳ Waiting for detail panel to render...`);
                     await sleep(400);
 
                     // Scroll DOWN inside the detail panel to reveal phone/address below fold
                     const detailScroll = document.querySelector('.m6QErb.DxyBCb.kA9KIf.dS8AEf, .m6QErb.WNBkOb, .bJzME, div[role="main"]');
-                    if (detailScroll) {
+                    if (detailScroll && (!lead.phone || !lead.website)) {
                         console.log(`[GeoLead] 📜 Scrolling down in detail panel...`);
                         detailScroll.scrollBy({ top: 400, behavior: 'smooth' });
                         await sleep(300);
                     }
 
-                    // Extract website from detail panel FIRST
-                    console.log(`[GeoLead] 🌐 Extracting website...`);
-                    const detailWeb = extractWebsiteFromDetailPanel();
-                    console.log(`[GeoLead] 🌐 Website extracted: ${detailWeb.website || 'No website found'} (status: ${detailWeb.websiteStatus})`);
-                    if (detailWeb.website && !isGoogleOrMapsUrl(detailWeb.website)) {
-                        lead.website = detailWeb.website;
-                        lead.websiteStatus = detailWeb.websiteStatus;
+                    // Extract website from detail panel FIRST (if not found in API)
+                    if (!lead.website) {
+                        console.log(`[GeoLead] 🌐 Extracting website from DOM...`);
+                        const detailWeb = extractWebsiteFromDetailPanel();
+                        console.log(`[GeoLead] 🌐 Website extracted: ${detailWeb.website || 'No website found'} (status: ${detailWeb.websiteStatus})`);
+                        if (detailWeb.website && !isGoogleOrMapsUrl(detailWeb.website)) {
+                            lead.website = detailWeb.website;
+                            lead.websiteStatus = detailWeb.websiteStatus;
+                        }
                     }
 
                     // Extract address (override list view address if we find a better one)
@@ -391,11 +514,13 @@
                         lead.postalCode = addrComp.postalCode;
                     }
 
-                    // Update lat/lng from placeUrl
-                    const updatedLatLng = extractLatLngFromUrl(lead.placeUrl);
-                    if (updatedLatLng.lat) {
-                        lead.latitude = updatedLatLng.lat;
-                        lead.longitude = updatedLatLng.lng;
+                    // Update lat/lng from placeUrl (if not already captured from API)
+                    if (!lead.latitude) {
+                        const updatedLatLng = extractLatLngFromUrl(lead.placeUrl);
+                        if (updatedLatLng.lat) {
+                            lead.latitude = updatedLatLng.lat;
+                            lead.longitude = updatedLatLng.lng;
+                        }
                     }
 
                     // Extract services
@@ -404,9 +529,9 @@
                     console.log(`[GeoLead] 🛠️ Services extracted:`, servicesList);
                     lead.services = servicesList.join(', ');
 
-                    // Extract phone with EXTENDED RETRY
-                    if (!skipPhone) {
-                        console.log(`[GeoLead] 📞 Extracting phone number...`);
+                    // Extract phone with EXTENDED RETRY (if not found in API)
+                    if (!lead.phone && !skipPhone) {
+                        console.log(`[GeoLead] 📞 Extracting phone number from DOM...`);
                         let detailPhone = '';
                         for (let attempt = 0; attempt < 3 && !detailPhone; attempt++) {
                             detailPhone = extractPhoneFromDetailPanel(lead);
@@ -1910,7 +2035,27 @@
         const container = getDetailPanelContainer();
         const foundPhones = new Set();
 
-        // METHOD 1: button with aria-label starting with "Phone:"
+        // METHOD 1: data-item-id="phone:tel:..." (Most reliable attribute check)
+        const phoneBtn = getVisibleElement(container, 'button[data-item-id^="phone:tel:"]');
+        if (phoneBtn) {
+            const ariaLabel = phoneBtn.getAttribute('aria-label');
+            if (ariaLabel) {
+                const cleaned = ariaLabel.replace(/^Phone:\s*/i, '').trim();
+                const normalized = normalizePhoneNumber(cleaned);
+                if (normalized) foundPhones.add(normalized);
+            }
+            const dataId = (phoneBtn.getAttribute('data-item-id') || '').replace('phone:tel:', '').trim();
+            const normalized = normalizePhoneNumber(dataId);
+            if (normalized) foundPhones.add(normalized);
+            const textNode = phoneBtn.querySelector('.Io6YTe');
+            if (textNode) {
+                const t = textNode.textContent.trim();
+                const normalized = normalizePhoneNumber(t);
+                if (normalized) foundPhones.add(normalized);
+            }
+        }
+
+        // METHOD 2: button with aria-label starting with "Phone:"
         const phoneBtnByLabel = getVisibleElement(container, 'button[aria-label^="Phone:"], button[aria-label^="phone:"]');
         if (phoneBtnByLabel) {
             const ariaLabel = phoneBtnByLabel.getAttribute('aria-label') || '';
@@ -1927,33 +2072,13 @@
             }
         }
 
-        // METHOD 2: button.CsEnBe with phone in aria-label
+        // METHOD 3: button.CsEnBe with phone in aria-label
         const csButtons = getVisibleElements(container, 'button.CsEnBe');
         for (const btn of csButtons) {
             const label = (btn.getAttribute('aria-label') || '');
             if (/phone|call|tel/i.test(label)) {
                 const cleaned = label.replace(/^(Phone|Call|Tel):\s*/i, '').trim();
                 const normalized = normalizePhoneNumber(cleaned);
-                if (normalized) foundPhones.add(normalized);
-            }
-        }
-
-        // METHOD 3: data-item-id="phone:tel:..."
-        const phoneBtn = getVisibleElement(container, 'button[data-item-id^="phone:tel:"]');
-        if (phoneBtn) {
-            const ariaLabel = phoneBtn.getAttribute('aria-label');
-            if (ariaLabel) {
-                const cleaned = ariaLabel.replace(/^Phone:\s*/i, '').trim();
-                const normalized = normalizePhoneNumber(cleaned);
-                if (normalized) foundPhones.add(normalized);
-            }
-            const dataId = (phoneBtn.getAttribute('data-item-id') || '').replace('phone:tel:', '').trim();
-            const normalized = normalizePhoneNumber(dataId);
-            if (normalized) foundPhones.add(normalized);
-            const textNode = phoneBtn.querySelector('.Io6YTe');
-            if (textNode) {
-                const t = textNode.textContent.trim();
-                const normalized = normalizePhoneNumber(t);
                 if (normalized) foundPhones.add(normalized);
             }
         }
@@ -2383,7 +2508,7 @@
     /**
      * Validate if a URL is likely a valid business website
      */
-    function isValidBusinessUrl(url) {
+    function isValidBusinessUrl(url, allowSocial = true) {
         if (!url) return false;
         
         try {
@@ -2397,17 +2522,19 @@
             const domainPattern = /(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$/i;
             if (!domainPattern.test(hostname)) return false;
             
-            // Exclude known non-business domains that might appear in business profiles
-            const nonBusinessDomains = [
-                'facebook.com', 'twitter.com', 'instagram.com', 'youtube.com',
-                'tiktok.com', 'linkedin.com', 'pinterest.com', 'yelp.com',
-                'tripadvisor.com', 'foursquare.com', 'yellowpages.com'
-            ];
-            
             if (hostname.includes('google.')) return false;
             
-            if (nonBusinessDomains.some(domain => hostname === domain || hostname.endsWith('.' + domain))) {
-                return false;
+            if (!allowSocial) {
+                // Exclude known non-business domains that might appear in business profiles
+                const nonBusinessDomains = [
+                    'facebook.com', 'twitter.com', 'instagram.com', 'youtube.com',
+                    'tiktok.com', 'linkedin.com', 'pinterest.com', 'yelp.com',
+                    'tripadvisor.com', 'foursquare.com', 'yellowpages.com'
+                ];
+                
+                if (nonBusinessDomains.some(domain => hostname === domain || hostname.endsWith('.' + domain))) {
+                    return false;
+                }
             }
             
             // Exclude common file extensions that aren't websites
@@ -2932,4 +3059,5 @@
     console.log('🌐 GeoLead AI content script loaded on Google Maps');
     console.log(`🌐 Page URL: ${window.location.href}`);
     console.log(`🌐 Visible cards on load: ${countVisibleCards()}`);
+    injectInterceptor();
 })();

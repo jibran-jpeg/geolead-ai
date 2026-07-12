@@ -47,6 +47,12 @@ function chromeExtensionPlugin() {
         copyFileSync(contentSrc, resolve(distDir, 'content.js'))
       }
 
+      // Copy interceptor script
+      const interceptorSrc = resolve(__dirname, 'src/content/interceptor.js')
+      if (existsSync(interceptorSrc)) {
+        copyFileSync(interceptorSrc, resolve(distDir, 'interceptor.js'))
+      }
+
       // Copy background script
       const bgSrc = resolve(__dirname, 'src/background/background.js')
       if (existsSync(bgSrc)) {
