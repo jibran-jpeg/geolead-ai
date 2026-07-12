@@ -1308,82 +1308,84 @@ const App = () => {
               <>
 
                 {/* Configuration */}
-                <div className="card-premium">
-                  <span className="card-title" style={{ display: 'block', marginBottom: '16px' }}>Scraper Settings</span>
-                  
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                    {/* Max depth */}
-                    <div className="slider-container">
-                      <div className="slider-labels">
-                        <span>Max Results Target</span>
-                        <span style={{ color: 'var(--primary)', fontWeight: 600 }}>{state.settings.scrollDepth} leads</span>
-                      </div>
-                      <input 
-                        type="range" 
-                        min="10" 
-                        max="100" 
-                        step="10"
-                        className="slider-premium" 
-                        value={state.settings.scrollDepth}
-                        onChange={(e) => updateSetting('scrollDepth', parseInt(e.target.value))}
-                        disabled={state.scrapeStatus === 'scraping'}
-                      />
-                    </div>
-
-                    {/* Scrape Speed */}
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '4px' }}>
-                      <span style={{ fontSize: '12px', color: 'var(--text-secondary)', fontWeight: 500 }}>Scrape Speed</span>
-                      <select 
-                        className="select-premium"
-                        value={state.settings.scrapeSpeed}
-                        onChange={(e) => updateSetting('scrapeSpeed', e.target.value)}
-                        disabled={state.scrapeStatus === 'scraping'}
-                      >
-                        <option value="slow">Slow (Safe)</option>
-                        <option value="medium">Medium</option>
-                        <option value="fast">Fast</option>
-                        <option value="ultra">Ultra (Risky)</option>
-                      </select>
-                    </div>
-
-                    {/* Only Without Website Toggle */}
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '4px', padding: '10px 12px', background: 'rgba(255,255,255,0.02)', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                        <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-primary)' }}>Only Without Website</span>
-                        <span style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>Extract businesses that do not have websites</span>
-                      </div>
-                      <label style={{ position: 'relative', display: 'inline-block', width: '34px', height: '20px' }}>
+                {state.scrapeStatus !== 'scraping' && (
+                  <div className="card-premium">
+                    <span className="card-title" style={{ display: 'block', marginBottom: '16px' }}>Scraper Settings</span>
+                    
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                      {/* Max depth */}
+                      <div className="slider-container">
+                        <div className="slider-labels">
+                          <span>Max Results Target</span>
+                          <span style={{ color: 'var(--primary)', fontWeight: 600 }}>{state.settings.scrollDepth} leads</span>
+                        </div>
                         <input 
-                          type="checkbox" 
-                          checked={!!state.settings.onlyWithoutWebsite}
-                          onChange={(e) => updateSetting('onlyWithoutWebsite', e.target.checked)}
+                          type="range" 
+                          min="10" 
+                          max="100" 
+                          step="10"
+                          className="slider-premium" 
+                          value={state.settings.scrollDepth}
+                          onChange={(e) => updateSetting('scrollDepth', parseInt(e.target.value))}
                           disabled={state.scrapeStatus === 'scraping'}
-                          style={{ opacity: 0, width: 0, height: 0 }}
                         />
-                        <span style={{
-                          position: 'absolute',
-                          cursor: 'pointer',
-                          top: 0, left: 0, right: 0, bottom: 0,
-                          backgroundColor: state.settings.onlyWithoutWebsite ? 'var(--primary)' : '#3f3f46',
-                          transition: '0.3s',
-                          borderRadius: '20px',
-                          display: 'flex',
-                          alignItems: 'center',
-                          padding: '2px'
-                        }}>
+                      </div>
+
+                      {/* Scrape Speed */}
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '4px' }}>
+                        <span style={{ fontSize: '12px', color: 'var(--text-secondary)', fontWeight: 500 }}>Scrape Speed</span>
+                        <select 
+                          className="select-premium"
+                          value={state.settings.scrapeSpeed}
+                          onChange={(e) => updateSetting('scrapeSpeed', e.target.value)}
+                          disabled={state.scrapeStatus === 'scraping'}
+                        >
+                          <option value="slow">Slow (Safe)</option>
+                          <option value="medium">Medium</option>
+                          <option value="fast">Fast</option>
+                          <option value="ultra">Ultra (Risky)</option>
+                        </select>
+                      </div>
+
+                      {/* Only Without Website Toggle */}
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '4px', padding: '10px 12px', background: 'rgba(255,255,255,0.02)', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                          <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-primary)' }}>Only Without Website</span>
+                          <span style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>Extract businesses that do not have websites</span>
+                        </div>
+                        <label style={{ position: 'relative', display: 'inline-block', width: '34px', height: '20px' }}>
+                          <input 
+                            type="checkbox" 
+                            checked={!!state.settings.onlyWithoutWebsite}
+                            onChange={(e) => updateSetting('onlyWithoutWebsite', e.target.checked)}
+                            disabled={state.scrapeStatus === 'scraping'}
+                            style={{ opacity: 0, width: 0, height: 0 }}
+                          />
                           <span style={{
-                            height: '16px',
-                            width: '16px',
-                            backgroundColor: 'white',
+                            position: 'absolute',
+                            cursor: 'pointer',
+                            top: 0, left: 0, right: 0, bottom: 0,
+                            backgroundColor: state.settings.onlyWithoutWebsite ? 'var(--primary)' : '#3f3f46',
                             transition: '0.3s',
-                            borderRadius: '50%',
-                            transform: state.settings.onlyWithoutWebsite ? 'translateX(14px)' : 'translateX(0)'
-                          }} />
-                        </span>
-                      </label>
+                            borderRadius: '20px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            padding: '2px'
+                          }}>
+                            <span style={{
+                              height: '16px',
+                              width: '16px',
+                              backgroundColor: 'white',
+                              transition: '0.3s',
+                              borderRadius: '50%',
+                              transform: state.settings.onlyWithoutWebsite ? 'translateX(14px)' : 'translateX(0)'
+                            }} />
+                          </span>
+                        </label>
+                      </div>
                     </div>
                   </div>
-                </div>
+                )}
 
                 {/* Scraper Status Panel */}
                 <div className="card-premium">
@@ -1394,6 +1396,20 @@ const App = () => {
                     const percent = Math.min(100, Math.round((found / total) * 100));
                     return (
                       <div className="progress-panel" style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                        {/* Compact settings badges at the top */}
+                        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '-4px' }}>
+                          <span style={{ fontSize: '9px', fontWeight: 600, color: 'var(--text-secondary)', background: 'rgba(255, 255, 255, 0.03)', border: '1px solid rgba(255, 255, 255, 0.05)', padding: '2px 6px', borderRadius: '4px' }}>
+                            Target: {total} leads
+                          </span>
+                          <span style={{ fontSize: '9px', fontWeight: 600, color: 'var(--text-secondary)', background: 'rgba(255, 255, 255, 0.03)', border: '1px solid rgba(255, 255, 255, 0.05)', padding: '2px 6px', borderRadius: '4px', textTransform: 'capitalize' }}>
+                            Speed: {state.settings?.scrapeSpeed || 'Medium'}
+                          </span>
+                          {state.settings?.onlyWithoutWebsite && (
+                            <span style={{ fontSize: '9px', fontWeight: 600, color: 'var(--warning)', background: 'rgba(245, 158, 11, 0.05)', border: '1px solid rgba(245, 158, 11, 0.1)', padding: '2px 6px', borderRadius: '4px' }}>
+                              No Website Only
+                            </span>
+                          )}
+                        </div>
                         {/* Active header with animated state indicator */}
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                           <span style={{ fontWeight: 600, color: 'var(--primary)', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px' }}>
