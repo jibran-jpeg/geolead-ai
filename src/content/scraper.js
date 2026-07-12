@@ -2343,9 +2343,29 @@
         ];
         
         for (const sel of selectors) {
-            const el = document.querySelector(sel);
-            if (el) return el;
+            const elements = document.querySelectorAll(sel);
+            for (const el of elements) {
+                // Check if the element is visible
+                const style = window.getComputedStyle(el);
+                if (style.display !== 'none' && style.visibility !== 'hidden' && el.offsetWidth > 0 && el.offsetHeight > 0) {
+                    // Make sure it's the detail panel, not the sidebar feed
+                    // The sidebar feed has role="feed" or contains div[role="feed"]
+                    if (!el.querySelector('div[role="feed"]') && !el.classList.contains('DxyBCb')) {
+                        return el;
+                    }
+                }
+            }
         }
+        
+        // Fallback to the visible role="main"
+        const mains = document.querySelectorAll('div[role="main"]');
+        for (const main of mains) {
+            const style = window.getComputedStyle(main);
+            if (style.display !== 'none' && style.visibility !== 'hidden' && main.offsetWidth > 0) {
+                return main;
+            }
+        }
+        
         return document; // Fallback to document
     }
 

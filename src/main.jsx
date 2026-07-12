@@ -387,6 +387,7 @@ const LeadPreview = React.memo(({ lead, position, onClose }) => {
 const App = () => {
   const [rawState, setRawState] = useState(INITIAL_STATE);
   const [searchQuery, setSearchQuery] = useState('');
+  const [filterWithoutWebsite, setFilterWithoutWebsite] = useState(false);
   const [toast, setToast] = useState(null);
   const [hoveredLead, setHoveredLead] = useState(null);
   const [previewPosition, setPreviewPosition] = useState({ x: 0, y: 0 });
@@ -518,27 +519,23 @@ const App = () => {
         if (loadedState.scrapeStatus === 'scraping' && loadedState.scrapingTabId && chrome.tabs) {
           chrome.tabs.get(loadedState.scrapingTabId, (tab) => {
             if (chrome.runtime.lastError || !tab) {
-              // Tab was closed, reset scraping state
-              chrome.storage.local.get(['geolead_state'], (result) => {
-                const fresh = result.geolead_state || loadedState;
-                fresh.scrapeStatus = 'idle';
-                fresh.scrapingTabId = null;
-                setRawState(fresh);
-                chrome.storage.local.set({ geolead_state: fresh });
-              });
+              // Tab was closed, reset scraping state in popup UI only
+              setRawState(prev => ({
+                ...prev,
+                scrapeStatus: 'idle',
+                scrapingTabId: null
+              }));
               runActiveTabCheck(loadedState);
             } else {
               // Tab exists, ping content script to check if it's still running
               chrome.tabs.sendMessage(loadedState.scrapingTabId, { type: 'CHECK_MAPS_PAGE' }, (response) => {
                 if (chrome.runtime.lastError || !response || !response.isRunning) {
-                  // Content script is dead or scraper is stopped
-                  chrome.storage.local.get(['geolead_state'], (result) => {
-                    const fresh = result.geolead_state || loadedState;
-                    fresh.scrapeStatus = 'idle';
-                    fresh.scrapingTabId = null;
-                    setRawState(fresh);
-                    chrome.storage.local.set({ geolead_state: fresh });
-                  });
+                  // Content script is dead or scraper is stopped, update popup UI only
+                  setRawState(prev => ({
+                    ...prev,
+                    scrapeStatus: 'idle',
+                    scrapingTabId: null
+                  }));
                 } else {
                   // Scraper is active! Sync progress (update only React state, background will persist progress/leads)
                   setRawState(prev => ({
@@ -1226,14 +1223,20 @@ const App = () => {
     }
   };
 
-  // Filter leads by search query (from current session or legacy)
+  // Filter leads by search query and without website toggle (from current session or legacy)
   const filteredLeads = effectiveLeads.filter(lead => {
     const query = searchQuery.toLowerCase();
-    return (
+    const matchesSearch = (
       (lead.businessName || '').toLowerCase().includes(query) ||
       (lead.category || '').toLowerCase().includes(query) ||
       (lead.address || '').toLowerCase().includes(query)
     );
+    
+    if (filterWithoutWebsite) {
+      return matchesSearch && (!lead.website || lead.websiteStatus === 'NO_WEBSITE');
+    }
+    
+    return matchesSearch;
   });
 
   return (
@@ -1582,10 +1585,35 @@ const App = () => {
                       placeholder="Search leads by name, phone, address..." 
                       className="input-premium"
                       style={{ paddingLeft: '28px', height: '28px', fontSize: '11px' }}
-                      value={state.searchQuery}
-                      onChange={(e) => updateStateField('searchQuery', e.target.value)}
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
                     />
                   </div>
+                  
+                  {/* Without Website Filter Toggle */}
+                  <label style={{ 
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    gap: '6px', 
+                    fontSize: '11px', 
+                    color: 'var(--text-secondary)',
+                    cursor: 'pointer',
+                    userSelect: 'none',
+                    background: 'var(--card-bg)',
+                    border: '1px solid var(--border-color)',
+                    borderRadius: 'var(--border-radius)',
+                    padding: '0 10px',
+                    height: '28px',
+                    whiteSpace: 'nowrap'
+                  }}>
+                    <input 
+                      type="checkbox" 
+                      checked={filterWithoutWebsite}
+                      onChange={(e) => setFilterWithoutWebsite(e.target.checked)}
+                      style={{ cursor: 'pointer' }}
+                    />
+                    Without Website
+                  </label>
                 </div>
 
                 {/* Session Leads Table */}

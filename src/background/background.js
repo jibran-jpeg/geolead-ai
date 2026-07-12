@@ -41,17 +41,27 @@ const MSG = {
 let storageQueue = Promise.resolve();
 
 function updateStorageState(updateFn) {
-    const nextPromise = storageQueue.then(() => {
-        return new Promise((resolve) => {
-            chrome.storage.local.get(['geolead_state'], (result) => {
-                const state = result.geolead_state || {};
-                const updatedState = updateFn(state);
-                chrome.storage.local.set({ geolead_state: updatedState }, () => {
-                    resolve(updatedState);
+    const nextPromise = storageQueue
+        .then(() => {
+            return new Promise((resolve) => {
+                chrome.storage.local.get(['geolead_state'], (result) => {
+                    const state = result.geolead_state || {};
+                    try {
+                        const updatedState = updateFn(state);
+                        chrome.storage.local.set({ geolead_state: updatedState }, () => {
+                            resolve(updatedState);
+                        });
+                    } catch (err) {
+                        console.error('[GeoLead BG] Error in updateStorageState updateFn:', err);
+                        resolve(state); // Resolve with old state so queue doesn't stall
+                    }
                 });
             });
+        })
+        .catch((err) => {
+            console.error('[GeoLead BG] Error in storageQueue chain:', err);
+            return {};
         });
-    });
     storageQueue = nextPromise;
     return nextPromise;
 }
