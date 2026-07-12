@@ -216,6 +216,7 @@
 
         const maxResults = config.scrollDepth || 30;
         const scrollDelay = config.speed || 2000;
+        const onlyWithoutWebsite = !!config.onlyWithoutWebsite;
 
         try {
             // Step 1: Wait for feed stabilization
@@ -511,35 +512,39 @@
                 if (success && lead) {
                     // Prevent empty / duplicate / wrong data saving
                     if (lead.businessName && !duplicateDetection.isDuplicate(lead, scrapedLeads)) {
-                        scrapedLeads.push(lead);
-                        currentFound = scrapedLeads.length;
-                        console.log(`[GeoLead DEBUG] Lead object successfully created:`, JSON.stringify(lead));
+                        if (onlyWithoutWebsite && (lead.website || lead.websiteStatus === 'HAS_WEBSITE')) {
+                            console.log(`[GeoLead DEBUG] Skipped "${lead.businessName}" because it has a website.`);
+                        } else {
+                            scrapedLeads.push(lead);
+                            currentFound = scrapedLeads.length;
+                            console.log(`[GeoLead DEBUG] Lead object successfully created:`, JSON.stringify(lead));
 
-                        // Confirm session counters & storage write successfully before proceeding
-                        try {
-                            const saveResponse = await new Promise((resolve) => {
-                                chrome.runtime.sendMessage({
-                                    type: MSG.SCRAPE_RESULT,
-                                    leads: [lead],
-                                    sessionId: currentSessionId
-                                }, (res) => {
-                                    resolve(res || { success: false });
+                            // Confirm session counters & storage write successfully before proceeding
+                            try {
+                                const saveResponse = await new Promise((resolve) => {
+                                    chrome.runtime.sendMessage({
+                                        type: MSG.SCRAPE_RESULT,
+                                        leads: [lead],
+                                        sessionId: currentSessionId
+                                    }, (res) => {
+                                        resolve(res || { success: false });
+                                    });
                                 });
-                            });
 
-                            if (saveResponse && saveResponse.success) {
-                                console.log(`[GeoLead DEBUG] Lead successfully written to storage: "${lead.businessName}"`);
-                                if (saveResponse.state) {
-                                    const session = saveResponse.state.sessions?.[currentSessionId];
-                                    if (session) {
-                                        console.log(`[GeoLead DEBUG] Session statistics updated: leadsCollected=${session.metadata?.leadsCollected}, businessesVisited=${session.metadata?.businessesVisited}`);
+                                if (saveResponse && saveResponse.success) {
+                                    console.log(`[GeoLead DEBUG] Lead successfully written to storage: "${lead.businessName}"`);
+                                    if (saveResponse.state) {
+                                        const session = saveResponse.state.sessions?.[currentSessionId];
+                                        if (session) {
+                                            console.log(`[GeoLead DEBUG] Session statistics updated: leadsCollected=${session.metadata?.leadsCollected}, businessesVisited=${session.metadata?.businessesVisited}`);
+                                        }
                                     }
+                                } else {
+                                    console.error(`[GeoLead DEBUG] Storage write NOT confirmed by background for: "${lead.businessName}"`);
                                 }
-                            } else {
-                                console.error(`[GeoLead DEBUG] Storage write NOT confirmed by background for: "${lead.businessName}"`);
+                            } catch (msgErr) {
+                                console.error('[GeoLead DEBUG] Verification messaging error:', msgErr);
                             }
-                        } catch (msgErr) {
-                            console.error('[GeoLead DEBUG] Verification messaging error:', msgErr);
                         }
                     } else {
                         console.log(`[GeoLead DEBUG] Skipped duplicate lead: "${lead.businessName}"`);
