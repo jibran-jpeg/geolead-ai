@@ -2672,13 +2672,7 @@
             }
         }
         
-        // Check if we're at the bottom of the container
-        const isAtBottom = Math.abs(container.scrollHeight - container.scrollTop - container.clientHeight) < 10;
-        if (isAtBottom) {
-            console.log(`[GeoLead] 📜 Reached bottom of scroll container`);
-        }
-        
-        return isAtBottom;
+        return false;
     }
 
     // ====== DEDUPLICATION (inline) ======
