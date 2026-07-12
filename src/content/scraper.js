@@ -17,6 +17,12 @@
 (function () {
     'use strict';
 
+    if (window.__geolead_scraper_injected__) {
+        console.log('[GeoLead] Scraper content script already injected. Skipping.');
+        return;
+    }
+    window.__geolead_scraper_injected__ = true;
+
     // ====== STATE ======
     let isRunning = false;
     let shouldStop = false;
