@@ -28,6 +28,107 @@
     // KEEP-ALIVE STATE
     let keepAliveInterval = null;
 
+    // ====== NETWORK INTERCEPTOR ======
+    const interceptedPlaces = new Map();
+
+    // Inject interceptor.js into Main World
+    function injectInterceptor() {
+        try {
+            const script = document.createElement('script');
+            script.src = chrome.runtime.getURL('interceptor.js');
+            script.onload = function() {
+                this.remove();
+            };
+            (document.head || document.documentElement).appendChild(script);
+            console.log('✓ GeoLead AI Network Interceptor injected');
+        } catch (e) {
+            console.error('Failed to inject GeoLead AI Interceptor:', e);
+        }
+    }
+
+    // Listen for intercepted network responses
+    window.addEventListener('message', (event) => {
+        if (event.source !== window) return;
+        if (event.data && event.data.type === 'GEOMEAD_API_RESPONSE') {
+            const data = event.data.data;
+            try {
+                if (data && Array.isArray(data)) {
+                    const details = extractDetailsFromRawArray(data);
+                    if (details && details.title) {
+                        const key = details.title.toLowerCase().trim();
+                        interceptedPlaces.set(key, details);
+                        console.log(`[GeoLead] Intercepted API details for: ${details.title}`, details);
+                    }
+                }
+            } catch (e) {
+                console.error('Error parsing intercepted API data:', e);
+            }
+        }
+    });
+
+    function extractDetailsFromRawArray(data) {
+        let title = null;
+        let phone = null;
+        let website = null;
+        let latitude = null;
+        let longitude = null;
+        let plusCode = null;
+
+        // Try direct lookup of name first
+        try {
+            if (data[0] && typeof data[0][1] === 'string') {
+                title = data[0][1];
+            }
+        } catch (e) {}
+
+        // Recursive search for phone, website, coordinates, and plus code
+        function search(val) {
+            if (!val) return;
+            if (typeof val === 'string') {
+                const str = val.trim();
+                if (str.startsWith('http') && !str.includes('google.com') && !str.includes('google.co')) {
+                    website = str;
+                } else if ((str.startsWith('+') || str.startsWith('0')) && str.replace(/[\s\-()]/g, '').length >= 7 && str.replace(/[\s\-()]/g, '').length <= 18) {
+                    if (/^\+?[0-9\s\-()]+$/.test(str)) {
+                        phone = str;
+                    }
+                } else if (/^[A-Z0-9]{4}\+[A-Z0-9]{2,8}\s+.+$/.test(str)) {
+                    plusCode = str;
+                }
+            } else if (typeof val === 'number') {
+                // Keep moving
+            } else if (Array.isArray(val)) {
+                if (val.length === 2 && typeof val[0] === 'number' && typeof val[1] === 'number') {
+                    const lat = val[0];
+                    const lng = val[1];
+                    if (Math.abs(lat) <= 90 && Math.abs(lng) <= 180 && lat !== 0 && lng !== 0 && !Number.isInteger(lat) && !Number.isInteger(lng)) {
+                        latitude = lat;
+                        longitude = lng;
+                    }
+                }
+                for (let i = 0; i < val.length; i++) {
+                    search(val[i]);
+                }
+            } else if (typeof val === 'object') {
+                for (const k in val) {
+                    search(val[k]);
+                }
+            }
+        }
+
+        search(data);
+
+        // Fallback title lookups if direct lookup returned empty
+        if (!title && data && Array.isArray(data)) {
+            try {
+                if (typeof data[6] === 'string') title = data[6];
+                else if (data[0] && typeof data[0][0] === 'string') title = data[0][0];
+            } catch (e) {}
+        }
+
+        return { title, phone, website, latitude, longitude, plusCode };
+    }
+
     function startKeepAlive(source = 'scraper_content') {
         if (keepAliveInterval) clearInterval(keepAliveInterval);
         keepAliveInterval = setInterval(() => {
@@ -111,452 +212,301 @@
         const scrollDelay = config.speed || 2000;
 
         try {
-            // Step 1: Find the scrollable results panel
+            // Step 1: Wait for feed stabilization
             const scrollContainer = findScrollContainer();
             if (!scrollContainer) {
-                sendError('Could not find Google Maps results panel. Please search for businesses first and make sure results are visible.');
+                sendError('Could not find Google Maps results panel. Please search for businesses first.');
                 isRunning = false;
                 return;
             }
 
-            console.log('[GeoLead] 📡 Found scroll container, starting scrape...');
+            console.log('[GeoLead] 📡 Found scroll container, starting dynamic loop...');
             console.log(`[GeoLead] ⚙️ Config: maxResults=${maxResults}, scrollDelay=${scrollDelay}ms`);
-            console.log('[GeoLead] 📍 Current URL:', window.location.href);
-            console.log('[GeoLead] 📊 Visible cards on start:', countVisibleCards());
 
-            const accumulatedLeads = new Map();
+            const processedPlaceUrls = new Set();
+            const scrapedLeads = [];
             currentFound = 0;
             currentTarget = maxResults;
 
-            // Step 2: Auto-scroll and collect results incrementally
-            console.log('[GeoLead] 🚀 Starting auto-scroll and data collection...');
-            await new Promise((resolve) => {
-                let totalRawFound = 0;
-                let previousRawCount = 0;
-                let filteredLeadsCount = 0;
-                let scrollAttempt = 0;
-                const MAX_SCROLL_ATTEMPTS = 100; // Prevent infinite scrolling
+            let scrollAttempt = 0;
+            let stallCount = 0;
+            const MAX_SCROLL_ATTEMPTS = 100;
 
-                const addLeadsToAccumulator = () => {
-                    const visibleLeads = parseResults();
-                    totalRawFound = visibleLeads.length;
+            // Send initial progress
+            sendProgress(0, maxResults);
 
-                    for (const lead of visibleLeads) {
-                        if (lead && lead.businessName) {
-                            const key = lead.businessName.toLowerCase().trim();
-                            if (!accumulatedLeads.has(key)) {
-                                accumulatedLeads.set(key, lead);
-                            }
-                        }
+            // Dynamic card processing loop
+            while (currentFound < maxResults && !shouldStop) {
+                // Find all cards matching our selector
+                const cards = findBusinessCards();
+                let nextCard = null;
+                let nextPlaceUrl = '';
+                let nextBusinessName = '';
+
+                // Find the first card that hasn't been processed
+                for (const card of cards) {
+                    const placeUrl = extractPlaceUrl(card);
+                    const name = extractBusinessName(card);
+                    if (placeUrl && name && !processedPlaceUrls.has(placeUrl)) {
+                        nextCard = card;
+                        nextPlaceUrl = placeUrl;
+                        nextBusinessName = name;
+                        break;
                     }
-                    currentFound = accumulatedLeads.size;
-                    filteredLeadsCount = currentFound;
-                    sendProgress(currentFound, currentTarget);
-                    
-                    // Debug logging
-                    console.log(`[GeoLead] 📊 Results: Raw=${totalRawFound}, Filtered=${filteredLeadsCount}, Target=${currentTarget}`);
-                };
-
-                // Parse initial visible results
-                addLeadsToAccumulator();
-
-                if (currentFound >= maxResults || shouldStop) {
-                    return resolve();
                 }
 
-                let isScrolling = false;
-                let fallbackTimer = null;
-                let stallCount = 0;
+                if (!nextCard) {
+                    // No new unprocessed cards visible. We need to scroll down to reveal more!
+                    if (isEndOfResults(scrollContainer)) {
+                        console.log('[GeoLead] 🏁 Reached end of results list.');
+                        break;
+                    }
 
-                const finish = () => {
-                    if (fallbackTimer) clearTimeout(fallbackTimer);
-                    observer.disconnect();
-                    resolve();
-                };
-
-                const triggerScroll = async () => {
-                    if (shouldStop || currentFound >= maxResults) return finish();
-                    if (isScrolling) return;
                     if (scrollAttempt >= MAX_SCROLL_ATTEMPTS) {
-                        console.log(`[GeoLead] 🛑 Maximum scroll attempts (${MAX_SCROLL_ATTEMPTS}) reached. Stopping.`);
-                        console.log(`[GeoLead] 📊 Final stats: Raw=${totalRawFound}, Filtered=${filteredLeadsCount}, Target=${currentTarget}`);
-                        return finish();
+                        console.log('[GeoLead] 🛑 Maximum scroll attempts reached.');
+                        break;
                     }
 
                     // Apply rate limiting
                     const rateLimitDelay = await rateLimiter.waitForRateLimit();
                     if (rateLimitDelay > 0) {
-                        console.log(`[GeoLead] ⏱️ Rate limiting: waiting ${rateLimitDelay}ms`);
-                        await new Promise(resolve => setTimeout(resolve, rateLimitDelay));
+                        await sleep(rateLimitDelay);
                     }
 
+                    console.log('[GeoLead] 📜 Scrolling feed down to load more listings...');
+                    const prevCardCount = cards.length;
+                    scrollContainer.scrollBy({ top: 800, behavior: 'smooth' });
                     scrollAttempt++;
-                    isScrolling = true;
-                    
-                    // Stall check using raw loaded cards count instead of filtered count
-                    if (totalRawFound === previousRawCount) {
+                    await sleep(scrollDelay);
+
+                    // Re-query cards to check if new cards appeared
+                    const newCards = findBusinessCards();
+                    if (newCards.length === prevCardCount) {
                         stallCount++;
                         if (stallCount >= 6) {
-                            console.log(`[GeoLead] 🛑 No new results after scrolling, stopping.`);
-                            console.log(`[GeoLead] 📊 Final stats: Raw=${totalRawFound}, Filtered=${filteredLeadsCount}, Target=${currentTarget}`);
-                            console.log(`[GeoLead] 🔄 Scroll attempts: ${scrollAttempt}`);
-                            return finish();
+                            console.log('[GeoLead] 🛑 Feed stalled (no new cards loaded after 6 scrolls), stopping.');
+                            break;
                         }
                     } else {
                         stallCount = 0;
                     }
-                    previousRawCount = totalRawFound;
-
-                    if (isEndOfResults(scrollContainer)) {
-                        console.log('[GeoLead] 🏁 Reached end of results list.');
-                        console.log(`[GeoLead] 📊 Final stats: Raw=${totalRawFound}, Filtered=${filteredLeadsCount}, Target=${currentTarget}`);
-                        console.log(`[GeoLead] 🔄 Scroll attempts: ${scrollAttempt}`);
-                        return finish();
-                    }
-
-                    // Push container down with smooth scrolling
-                    scrollContainer.scrollBy({ top: 800, behavior: 'smooth' });
-
-                    // Debounce rapid scrolling
-                    setTimeout(() => { isScrolling = false; }, 400);
-
-                    // Set a fallback timer in case MutationObserver never fires (e.g. slow network)
-                    if (fallbackTimer) clearTimeout(fallbackTimer);
-                    fallbackTimer = setTimeout(() => {
-                        if (!shouldStop && currentFound < maxResults) {
-                            triggerScroll();
-                        }
-                    }, scrollDelay);
-                };
-
-                const observer = new MutationObserver((mutations) => {
-                    if (shouldStop) return finish();
-
-                    const hasNewNodes = mutations.some(m => m.addedNodes.length > 0);
-                    if (hasNewNodes) {
-                        const prevFound = currentFound;
-                        addLeadsToAccumulator();
-                        
-                        if (currentFound >= maxResults) {
-                            console.log(`[GeoLead] 🎯 Reached target: ${currentFound}/${maxResults}`);
-                            return finish();
-                        }
-
-                        // Instant next scroll if we got new data
-                        if (currentFound > prevFound && !isScrolling) {
-                            if (fallbackTimer) clearTimeout(fallbackTimer);
-                            setTimeout(() => triggerScroll(), 100); // 100ms tiny buffer
-                        }
-                    }
-                });
-
-                observer.observe(scrollContainer, { childList: true, subtree: true });
-
-                // Kick off first scroll
-                triggerScroll();
-            });
-
-            // Convert accumulated Map to array and trim to maxResults
-            const allLeads = Array.from(accumulatedLeads.values()).slice(0, maxResults);
-
-            // Step 3.5: DEEP SCRAPE — click into each card to get phone/email/address
-            console.log(`[GeoLead] 🎯 Starting deep scrape for ${allLeads.length} leads...`);
-            console.log('[GeoLead] 📋 Leads to scrape:', allLeads.map(l => `${l.businessName} (phone: ${l.phone ? '✅' : '❌'}, website: ${l.website ? '✅' : '❌'})`));
-
-            if (scrollContainer) {
-                scrollContainer.scrollTo({ top: 0, behavior: 'instant' });
-                await sleep(800);
-            }
-
-            for (let i = 0; i < allLeads.length; i++) {
-                if (shouldStop) break;
-
-                const lead = allLeads[i];
-                console.log(`[GeoLead] 🔍 Processing #${i+1}/${allLeads.length}: ${lead.businessName}`);
-
-                // OPTIMIZATION: If the lead already has BOTH a phone and a website, skip clicking entirely!
-                if (lead.phone && lead.website) {
-                    console.log(`[GeoLead] ⚡ Skip clicking for #${i}: ${lead.businessName} — already has phone and website`);
-                    sendProgress(i + 1, allLeads.length);
                     continue;
                 }
 
-                let skipPhone = false;
-                if (lead.phone) {
-                    console.log(`[GeoLead] Skip Phone for #${i}: ${lead.businessName} — already has phone`);
-                    skipPhone = true;
-                }
+                // We have a valid unprocessed card!
+                console.log(`[GeoLead] 🔍 Processing Card #${currentFound + 1}: ${nextBusinessName}`);
+                processedPlaceUrls.add(nextPlaceUrl);
 
-                try {
-                    let card = null;
-                    let scrollAttempts = 0;
-                    const allCards = findBusinessCards();
-                    console.log(`[GeoLead] 🔍 Looking for card #${i}: ${lead.businessName} among ${allCards.length} visible cards`);
+                // Try to click and scrape the details
+                let success = false;
+                let retryCount = 0;
+                let lead = null;
 
-                    while (!card && scrollAttempts < 15) {
-                        const cards = findBusinessCards();
-                        console.log(`[GeoLead] 📋 Card search attempt ${scrollAttempts + 1}: ${cards.length} cards visible`);
-                        
-                        for (const c of cards) {
-                            const nameEl = c.querySelector('a.hfpxzc');
-                            if (nameEl) {
-                                const rawLabel = (nameEl.getAttribute('aria-label') || '').trim();
-                                const cleanedLabel = cleanBusinessName(rawLabel).toLowerCase();
-                                const targetName = lead.businessName.trim().toLowerCase();
-                                
-                                console.log(`[GeoLead] 🎯 Comparing: "${cleanedLabel}" vs "${targetName}"`);
-                                
-                                if (cleanedLabel === targetName || rawLabel.toLowerCase() === targetName || cleanedLabel.includes(targetName)) {
-                                    card = c;
-                                    console.log(`[GeoLead] ✅ Found matching card!`);
-                                    break;
+                while (!success && retryCount < 3 && !shouldStop) {
+                    try {
+                        // Click the card
+                        const clickTarget = nextCard.querySelector('a[href*="/maps/place/"]') || nextCard.querySelector('a.hfpxzc') || nextCard;
+                        clickTarget.scrollIntoView({ behavior: 'instant', block: 'center' });
+                        await sleep(200);
+                        clickTarget.click();
+
+                        // Wait for details panel and verify correct business
+                        console.log(`[GeoLead] 🏢 Waiting for detail panel for: ${nextBusinessName} (Attempt ${retryCount + 1})...`);
+                        const correctPanel = await waitForCorrectDetailPanel(nextBusinessName, 6000);
+                        if (!correctPanel) {
+                            throw new Error(`Detail panel title did not match expected business: ${nextBusinessName}`);
+                        }
+
+                        // Wait for info section to render
+                        await sleep(500);
+
+                        // Scroll DOWN inside detail panel to trigger lazy loads
+                        const detailScroll = document.querySelector('.m6QErb.DxyBCb.kA9KIf.dS8AEf, .m6QErb.WNBkOb, .bJzME, div[role="main"]');
+                        if (detailScroll) {
+                            detailScroll.scrollBy({ top: 400, behavior: 'smooth' });
+                            await sleep(300);
+                        }
+
+                        // Create raw lead object from card
+                        lead = extractLeadFromCard(nextCard);
+                        if (!lead) {
+                            lead = {
+                                id: generateId(),
+                                businessName: nextBusinessName,
+                                placeUrl: nextPlaceUrl,
+                                scrapedAt: new Date().toISOString()
+                            };
+                        }
+
+                        // ====== EXTRACT DETAILED FIELDS ======
+                        // 1. Check API Interceptor map
+                        const apiDetails = interceptedPlaces.get(nextBusinessName.toLowerCase().trim());
+                        if (apiDetails) {
+                            console.log(`[GeoLead] 🚀 Found API interceptor payload for: ${nextBusinessName}`);
+                            if (apiDetails.phone) lead.phone = apiDetails.phone;
+                            if (apiDetails.website) {
+                                lead.website = apiDetails.website;
+                                lead.websiteStatus = 'VALID';
+                            }
+                            if (apiDetails.latitude) {
+                                lead.latitude = apiDetails.latitude;
+                                lead.longitude = apiDetails.longitude;
+                            }
+                            if (apiDetails.plusCode) lead.plusCode = apiDetails.plusCode;
+                        }
+
+                        // 2. Fallback to DOM parsing
+                        if (!lead.website) {
+                            const detailWeb = extractWebsiteFromDetailPanel();
+                            if (detailWeb.website && !isGoogleOrMapsUrl(detailWeb.website)) {
+                                lead.website = detailWeb.website;
+                                lead.websiteStatus = detailWeb.websiteStatus;
+                            }
+                        }
+
+                        if (!lead.phone) {
+                            let detailPhone = '';
+                            for (let attempt = 0; attempt < 2 && !detailPhone; attempt++) {
+                                detailPhone = extractPhoneFromDetailPanel(lead);
+                                if (!detailPhone && detailScroll) {
+                                    detailScroll.scrollBy({ top: 300, behavior: 'smooth' });
+                                    await sleep(250);
                                 }
                             }
+                            if (detailPhone) lead.phone = detailPhone;
                         }
 
-                        if (!card) {
-                            console.log(`[GeoLead] ❌ No match found, scrolling down...`);
-                            const currentScroll = findScrollContainer();
-                            if (currentScroll) {
-                                currentScroll.scrollBy({ top: 300, behavior: 'instant' });
-                            } else if (scrollContainer && scrollContainer.isConnected) {
-                                scrollContainer.scrollBy({ top: 300, behavior: 'instant' });
-                            }
-                            await sleep(200);
-                            scrollAttempts++;
+                        // Address, category, hours, and status
+                        const detailAddress = extractAddressFromDetailPanel();
+                        if (detailAddress) {
+                            lead.address = detailAddress;
+                            const addrComp = parseAddressComponents(detailAddress);
+                            lead.city = addrComp.city;
+                            lead.state = addrComp.state;
+                            lead.country = addrComp.country;
+                            lead.postalCode = addrComp.postalCode;
                         }
-                    }
 
-                    if (!card) {
-                        console.log(`[GeoLead] ❓ Card not found for #${i}: ${lead.businessName} after ${scrollAttempts} attempts`);
-                        sendProgress(i + 1, allLeads.length);
-                        continue;
-                    }
-                    
-                    console.log(`[GeoLead] ✅ Found card for ${lead.businessName}`);
-
-                    const clickTarget = card.querySelector('a.hfpxzc');
-                    if (!clickTarget) {
-                        sendProgress(i + 1, allLeads.length);
-                        continue;
-                    }
-
-                    // Scroll into view and click
-                    clickTarget.scrollIntoView({ behavior: 'instant', block: 'center' });
-                    await sleep(150);
-                    clickTarget.click();
-
-                    // CRITICAL: Wait until the detail panel title matches THIS business
-                    console.log(`[GeoLead] 🏢 Waiting for detail panel for: ${lead.businessName}`);
-                    const correctPanel = await waitForCorrectDetailPanel(lead.businessName, 5000);
-                    if (!correctPanel) {
-                        console.log(`[GeoLead] ❌ Wrong/stale panel for: ${lead.businessName} — skipping`);
-                        await goBackToList();
-                        sendProgress(i + 1, allLeads.length);
-                        continue;
-                    }
-                    console.log(`[GeoLead] ✅ Detail panel loaded for: ${lead.businessName}`);
-
-                    // Wait for info section to fully render
-                    console.log(`[GeoLead] ⏳ Waiting for detail panel to render...`);
-                    await sleep(400);
-
-                    // Scroll DOWN inside the detail panel to reveal phone/address below fold
-                    const detailScroll = document.querySelector('.m6QErb.DxyBCb.kA9KIf.dS8AEf, .m6QErb.WNBkOb, .bJzME, div[role="main"]');
-                    if (detailScroll) {
-                        console.log(`[GeoLead] 📜 Scrolling down in detail panel...`);
-                        detailScroll.scrollBy({ top: 400, behavior: 'smooth' });
-                        await sleep(300);
-                    }
-
-                    // Extract website from detail panel FIRST
-                    console.log(`[GeoLead] 🌐 Extracting website...`);
-                    const detailWeb = extractWebsiteFromDetailPanel();
-                    console.log(`[GeoLead] 🌐 Website extracted: ${detailWeb.website || 'No website found'} (status: ${detailWeb.websiteStatus})`);
-                    if (detailWeb.website && !isGoogleOrMapsUrl(detailWeb.website)) {
-                        lead.website = detailWeb.website;
-                        lead.websiteStatus = detailWeb.websiteStatus;
-                    }
-
-                    // Extract address (override list view address if we find a better one)
-                    console.log(`[GeoLead] 🏠 Extracting address...`);
-                    const detailAddress = extractAddressFromDetailPanel();
-                    console.log(`[GeoLead] 🏠 Address extracted: ${detailAddress || 'No address found'}`);
-                    if (detailAddress) {
-                        lead.address = detailAddress;
-                        const addrComp = parseAddressComponents(detailAddress);
-                        lead.city = addrComp.city;
-                        lead.state = addrComp.state;
-                        lead.country = addrComp.country;
-                        lead.postalCode = addrComp.postalCode;
-                    }
-
-                    // Update lat/lng from placeUrl
-                    const updatedLatLng = extractLatLngFromUrl(lead.placeUrl);
-                    if (updatedLatLng.lat) {
-                        lead.latitude = updatedLatLng.lat;
-                        lead.longitude = updatedLatLng.lng;
-                    }
-
-                    // Extract services
-                    console.log(`[GeoLead] 🛠️ Extracting business services...`);
-                    const servicesList = extractServicesFromDetailPanel();
-                    console.log(`[GeoLead] 🛠️ Services extracted:`, servicesList);
-                    lead.services = servicesList.join(', ');
-
-                    // Extract phone with EXTENDED RETRY
-                    if (!skipPhone) {
-                        console.log(`[GeoLead] 📞 Extracting phone number...`);
-                        let detailPhone = '';
-                        for (let attempt = 0; attempt < 3 && !detailPhone; attempt++) {
-                            detailPhone = extractPhoneFromDetailPanel(lead);
-                            console.log(`[GeoLead] 📞 Phone attempt ${attempt + 1}: ${detailPhone || 'No phone found'}`);
-                            if (!detailPhone) {
-                                if (detailScroll) detailScroll.scrollBy({ top: 300, behavior: 'smooth' });
-                                await sleep(250 + attempt * 100);
+                        if (!lead.latitude) {
+                            const latLng = extractLatLngFromUrl(lead.placeUrl);
+                            if (latLng.lat) {
+                                lead.latitude = latLng.lat;
+                                lead.longitude = latLng.lng;
                             }
                         }
-                        if (detailPhone) {
-                            lead.phone = detailPhone;
-                            console.log(`[GeoLead] ✅ Phone extracted: ${detailPhone}`);
+
+                        const servicesList = extractServicesFromDetailPanel();
+                        if (servicesList.length > 0) {
+                            lead.services = servicesList.join(', ');
                         }
-                    }
 
-                    // Extract email from Maps Panel
-                    console.log(`[GeoLead] 📧 Extracting email...`);
-                    const detailEmail = extractEmailFromDetailPanel(lead);
-                    console.log(`[GeoLead] 📧 Email extracted: ${detailEmail || 'No email found'}`);
-                    if (detailEmail) {
-                        lead.email = detailEmail;
-                        lead.emails = [detailEmail];
-                    }
+                        const hoursAndStatus = extractHoursAndStatusFromDetailPanel();
+                        lead.businessStatus = hoursAndStatus.businessStatus;
+                        lead.openingHours = hoursAndStatus.openingHours;
 
-                    // Extract status and hours
-                    console.log(`[GeoLead] ⏰ Extracting hours and status...`);
-                    const hoursAndStatus = extractHoursAndStatusFromDetailPanel();
-                    lead.businessStatus = hoursAndStatus.businessStatus;
-                    lead.openingHours = hoursAndStatus.openingHours;
-                    console.log(`[GeoLead] ⏰ Status: ${lead.businessStatus}, Hours: ${lead.openingHours}`);
+                        const mapsSocials = extractSocialsFromDetailPanel();
+                        Object.keys(mapsSocials).forEach(key => {
+                            if (mapsSocials[key]) lead[key] = mapsSocials[key];
+                        });
 
-                    // Extract all socials from Maps Panel
-                    console.log(`[GeoLead] 🔗 Extracting socials from Maps panel...`);
-                    const mapsSocials = extractSocialsFromDetailPanel();
-                    Object.keys(mapsSocials).forEach(key => {
-                        if (mapsSocials[key]) {
-                            lead[key] = mapsSocials[key];
+                        const detailEmail = extractEmailFromDetailPanel(lead);
+                        if (detailEmail) {
+                            lead.email = detailEmail;
+                            lead.emails = [detailEmail];
                         }
-                    });
 
-                    // On-the-fly website contacts crawling!
-                    if (lead.website && !isGoogleOrMapsUrl(lead.website)) {
-                        console.log(`[GeoLead] 🌐 Crawling website contacts for: ${lead.businessName} at ${lead.website}`);
-                        try {
-                            const result = await new Promise((resolve) => {
-                                chrome.runtime.sendMessage({
-                                    type: 'SCRAPE_FETCH_CONTACTS',
-                                    website: lead.website,
-                                    businessName: lead.businessName
-                                }, (res) => {
-                                    resolve(res || { emails: [], phones: [], socials: {}, websiteAnalysis: null });
+                        // 3. Website contact crawl
+                        if (lead.website && !isGoogleOrMapsUrl(lead.website)) {
+                            console.log(`[GeoLead] 🌐 Fetching website contacts for: ${lead.businessName}...`);
+                            try {
+                                const result = await new Promise((resolve) => {
+                                    chrome.runtime.sendMessage({
+                                        type: 'SCRAPE_FETCH_CONTACTS',
+                                        website: lead.website,
+                                        businessName: lead.businessName
+                                    }, (res) => {
+                                        resolve(res || { emails: [], phones: [], socials: {}, websiteAnalysis: null });
+                                    });
                                 });
-                            });
-                            
-                            console.log(`[GeoLead] Website crawl result:`, result);
-                            
-                            // Merge emails
-                            if (result.emails && result.emails.length > 0) {
-                                const currentEmails = lead.emails || (lead.email ? [lead.email] : []);
-                                const mergedEmails = Array.from(new Set([...currentEmails, ...result.emails]));
-                                lead.emails = mergedEmails;
-                                lead.email = mergedEmails[0];
-                            }
-                            
-                            // Merge phones
-                            if (result.phones && result.phones.length > 0) {
-                                if (!lead.phone) {
+
+                                if (result.emails && result.emails.length > 0) {
+                                    const currentEmails = lead.emails || (lead.email ? [lead.email] : []);
+                                    const merged = Array.from(new Set([...currentEmails, ...result.emails]));
+                                    lead.emails = merged;
+                                    lead.email = merged[0];
+                                }
+                                if (result.phones && result.phones.length > 0 && !lead.phone) {
                                     const normalized = normalizePhoneNumber(result.phones[0]);
-                                    if (normalized) {
-                                        lead.phone = normalized;
-                                        console.log(`[GeoLead] ✅ Phone extracted from website: ${normalized}`);
-                                    }
+                                    if (normalized) lead.phone = normalized;
                                 }
+                                if (result.socials) {
+                                    Object.keys(result.socials).forEach(key => {
+                                        if (result.socials[key] && !lead[key]) {
+                                            lead[key] = result.socials[key];
+                                        }
+                                    });
+                                }
+                                if (result.websiteAnalysis) {
+                                    lead.websiteAnalysis = result.websiteAnalysis;
+                                }
+                            } catch (e) {
+                                console.warn('[GeoLead] Background crawling failed:', e.message);
                             }
-
-                            // Merge socials from website
-                            if (result.socials) {
-                                Object.keys(result.socials).forEach(key => {
-                                    if (result.socials[key] && !lead[key]) {
-                                        lead[key] = result.socials[key];
-                                        console.log(`[GeoLead] ✅ Social extracted from website: ${key} = ${result.socials[key]}`);
-                                    }
-                                });
-                            }
-
-                            // Store website analysis details
-                            if (result.websiteAnalysis) {
-                                lead.websiteAnalysis = result.websiteAnalysis;
-                            }
-                        } catch (err) {
-                            console.warn('[GeoLead] Website contacts crawling failed:', err.message);
                         }
-                    }
 
-                    // Apply comprehensive quality assurance
-                    const cleanedLead = qualityAssurance.cleanLeadData(lead);
-                    if (cleanedLead) {
-                        // Calculate lead quality score
-                        const scoring = scoringUtils.calculateLeadQualityScore(cleanedLead);
-                        cleanedLead.leadQualityScore = scoring.score;
-                        cleanedLead.priority = scoring.priority;
-                        cleanedLead.recommendations = scoring.recommendations;
-                        
-                        // Apply validation
-                        const validation = qualityAssurance.validateLead(cleanedLead);
-                        cleanedLead.validationIssues = validation.issues;
-                        cleanedLead.warnings = validation.warnings;
-                        
-                        // Assign back
-                        Object.assign(lead, cleanedLead);
-                        
-                        // Log quality metrics
-                        console.log(`[GeoLead] ✅ Quality score for ${lead.businessName}: ${scoring.score}/10 (${scoring.priority})`);
-                        if (validation.issues.length > 0) {
-                            console.log(`[GeoLead] ⚠️ Issues: ${validation.issues.join(', ')}`);
+                        // Quality check and validate
+                        const cleanedLead = qualityAssurance.cleanLeadData(lead);
+                        if (cleanedLead) {
+                            const scoring = scoringUtils.calculateLeadQualityScore(cleanedLead);
+                            cleanedLead.leadQualityScore = scoring.score;
+                            cleanedLead.priority = scoring.priority;
+                            cleanedLead.recommendations = scoring.recommendations;
+
+                            const validation = qualityAssurance.validateLead(cleanedLead);
+                            cleanedLead.validationIssues = validation.issues;
+                            cleanedLead.warnings = validation.warnings;
+
+                            Object.assign(lead, cleanedLead);
                         }
+
+                        success = true;
+                    } catch (err) {
+                        retryCount++;
+                        console.warn(`[GeoLead] Retry ${retryCount} failed for ${nextBusinessName}:`, err.message);
+                        await sleep(500);
                     }
-
-                    // Go back to list
-                    await goBackToList();
-                    await sleep(250);
-
-                    sendProgress(i + 1, allLeads.length);
-                    console.log(`[GeoLead] Deep scraped ${i + 1}/${allLeads.length}: ${lead.businessName} — Phone: ${lead.phone || ' Not listed'}`);
-
-                } catch (e) {
-                    console.warn(`[GeoLead] Deep scrape error for ${lead.businessName}:`, e.message);
-                    try { await goBackToList(); } catch (_) { }
-                    await sleep(250);
-                    sendProgress(i + 1, allLeads.length);
                 }
+
+                if (success && lead) {
+                    // Prevent empty / duplicate / wrong data saving
+                    if (lead.businessName && !duplicateDetection.isDuplicate(lead, scrapedLeads)) {
+                        scrapedLeads.push(lead);
+                        currentFound = scrapedLeads.length;
+                        console.log(`[GeoLead] ✅ Successfully saved lead: ${lead.businessName}`);
+                    }
+                } else {
+                    console.error(`[GeoLead] ❌ Failed to scrape business: ${nextBusinessName} after 3 retries. Skipping.`);
+                }
+
+                // Send progress update to UI
+                sendProgress(scrapedLeads.length, maxResults);
             }
 
-            console.log('[GeoLead] Deep scrape complete.');
-
-            // Step 4: Apply deduplication
-            const dedupedLeads = deduplicateLeads(allLeads);
-            const duplicatesRemoved = allLeads.length - dedupedLeads.length;
-
-            console.log(`[GeoLead] 📊 Final: ${dedupedLeads.length} unique leads (${duplicatesRemoved} duplicates removed)`);
-
-            // Step 5: Send results to popup
+            console.log('[GeoLead] Dynamic scraping loop finished.');
             const elapsedMs = Date.now() - scrapeStartTime;
 
-    // Send results to popup and update current session
-    chrome.runtime.sendMessage({
-        type: MSG.SCRAPE_RESULT,
-        leads: dedupedLeads,
-        sessionId: currentSessionId
-    });
+            // Deduplicate final results
+            const dedupedLeads = deduplicateLeads(scrapedLeads);
+            const duplicatesRemoved = scrapedLeads.length - dedupedLeads.length;
+
+            console.log(`[GeoLead] 📊 Final: ${dedupedLeads.length} unique leads saved.`);
+
+            // Send result and done messages
+            chrome.runtime.sendMessage({
+                type: MSG.SCRAPE_RESULT,
+                leads: dedupedLeads,
+                sessionId: currentSessionId
+            });
 
             chrome.runtime.sendMessage({
                 type: MSG.SCRAPE_DONE,
@@ -568,8 +518,8 @@
             });
 
         } catch (error) {
-            console.error('[GeoLead] Scraping error:', error);
-            sendError(error.message || 'Unknown scraping error occurred');
+            console.error('[GeoLead] Scraping execution error:', error);
+            sendError(error.message || 'Scraping engine error occurred.');
         } finally {
             stopKeepAlive();
         }
@@ -1053,10 +1003,11 @@
     // ====== DOM PARSER (inline for content script compatibility) ======
 
     const CARD_SELECTORS = [
+        'a[href*="/maps/place/"]',
+        'a.hfpxzc',
         'div.Nv2PK',
         'div[jsaction*="mouseover"].lI9IFe',
         'div[role="article"]',
-        'a.hfpxzc',
     ];
 
     const NAME_SELECTORS = [
@@ -1077,6 +1028,24 @@
         'span.UY7F9',
         'span.e4rVHe.fontBodyMedium',
     ];
+
+    function getCardContainerFromLink(a) {
+        if (!a) return null;
+        const feed = document.querySelector('div[role="feed"]');
+        if (!feed) {
+            return a.closest('div[role="article"]') || a.closest('div.Nv2PK') || a.parentElement?.parentElement?.parentElement || a.parentElement;
+        }
+        
+        let parent = a;
+        while (parent && parent !== document.body) {
+            if (parent.parentElement === feed) {
+                return parent;
+            }
+            parent = parent.parentElement;
+        }
+        
+        return a.closest('div[role="article"]') || a.closest('div.Nv2PK') || a.parentElement;
+    }
 
     /**
      * Parse all visible business cards with production-grade processing
@@ -1120,9 +1089,9 @@
         for (const selector of CARD_SELECTORS) {
             const cards = document.querySelectorAll(selector);
             if (cards.length > 0) {
-                if (cards[0].tagName === 'A') {
+                if (cards[0].tagName === 'A' || selector.startsWith('a')) {
                     return Array.from(cards)
-                        .map(a => a.closest('div.Nv2PK') || a.parentElement)
+                        .map(a => getCardContainerFromLink(a))
                         .filter(Boolean);
                 }
                 return Array.from(cards);
@@ -1318,7 +1287,7 @@
 
     function extractBusinessName(card) {
         // Heuristic: The most reliable source is the aria-label of the main wrapper link
-        const mainLink = card.querySelector('a.hfpxzc');
+        const mainLink = card.querySelector('a[href*="/maps/place/"]') || card.querySelector('a.hfpxzc') || card.querySelector('a');
         if (mainLink) {
             const label = mainLink.getAttribute('aria-label');
             if (label && label.trim().length > 0) return cleanBusinessName(label.trim());
@@ -1346,7 +1315,7 @@
     }
 
     function extractPlaceUrl(card) {
-        const linkEl = card.querySelector('a.hfpxzc') || card.querySelector('a[href*="maps"]');
+        const linkEl = card.querySelector('a[href*="/maps/place/"]') || card.querySelector('a.hfpxzc') || card.querySelector('a[href*="maps"]');
         return linkEl?.href || '';
     }
 
@@ -1910,7 +1879,27 @@
         const container = getDetailPanelContainer();
         const foundPhones = new Set();
 
-        // METHOD 1: button with aria-label starting with "Phone:"
+        // METHOD 1: data-item-id="phone:tel:..." (Most reliable attribute check)
+        const phoneBtn = getVisibleElement(container, 'button[data-item-id^="phone:tel:"]');
+        if (phoneBtn) {
+            const ariaLabel = phoneBtn.getAttribute('aria-label');
+            if (ariaLabel) {
+                const cleaned = ariaLabel.replace(/^Phone:\s*/i, '').trim();
+                const normalized = normalizePhoneNumber(cleaned);
+                if (normalized) foundPhones.add(normalized);
+            }
+            const dataId = (phoneBtn.getAttribute('data-item-id') || '').replace('phone:tel:', '').trim();
+            const normalized = normalizePhoneNumber(dataId);
+            if (normalized) foundPhones.add(normalized);
+            const textNode = phoneBtn.querySelector('.Io6YTe');
+            if (textNode) {
+                const t = textNode.textContent.trim();
+                const normalized = normalizePhoneNumber(t);
+                if (normalized) foundPhones.add(normalized);
+            }
+        }
+
+        // METHOD 2: button with aria-label starting with "Phone:"
         const phoneBtnByLabel = getVisibleElement(container, 'button[aria-label^="Phone:"], button[aria-label^="phone:"]');
         if (phoneBtnByLabel) {
             const ariaLabel = phoneBtnByLabel.getAttribute('aria-label') || '';
@@ -1927,33 +1916,13 @@
             }
         }
 
-        // METHOD 2: button.CsEnBe with phone in aria-label
+        // METHOD 3: button.CsEnBe with phone in aria-label
         const csButtons = getVisibleElements(container, 'button.CsEnBe');
         for (const btn of csButtons) {
             const label = (btn.getAttribute('aria-label') || '');
             if (/phone|call|tel/i.test(label)) {
                 const cleaned = label.replace(/^(Phone|Call|Tel):\s*/i, '').trim();
                 const normalized = normalizePhoneNumber(cleaned);
-                if (normalized) foundPhones.add(normalized);
-            }
-        }
-
-        // METHOD 3: data-item-id="phone:tel:..."
-        const phoneBtn = getVisibleElement(container, 'button[data-item-id^="phone:tel:"]');
-        if (phoneBtn) {
-            const ariaLabel = phoneBtn.getAttribute('aria-label');
-            if (ariaLabel) {
-                const cleaned = ariaLabel.replace(/^Phone:\s*/i, '').trim();
-                const normalized = normalizePhoneNumber(cleaned);
-                if (normalized) foundPhones.add(normalized);
-            }
-            const dataId = (phoneBtn.getAttribute('data-item-id') || '').replace('phone:tel:', '').trim();
-            const normalized = normalizePhoneNumber(dataId);
-            if (normalized) foundPhones.add(normalized);
-            const textNode = phoneBtn.querySelector('.Io6YTe');
-            if (textNode) {
-                const t = textNode.textContent.trim();
-                const normalized = normalizePhoneNumber(t);
                 if (normalized) foundPhones.add(normalized);
             }
         }
@@ -2383,7 +2352,7 @@
     /**
      * Validate if a URL is likely a valid business website
      */
-    function isValidBusinessUrl(url) {
+    function isValidBusinessUrl(url, allowSocial = true) {
         if (!url) return false;
         
         try {
@@ -2397,17 +2366,19 @@
             const domainPattern = /(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$/i;
             if (!domainPattern.test(hostname)) return false;
             
-            // Exclude known non-business domains that might appear in business profiles
-            const nonBusinessDomains = [
-                'facebook.com', 'twitter.com', 'instagram.com', 'youtube.com',
-                'tiktok.com', 'linkedin.com', 'pinterest.com', 'yelp.com',
-                'tripadvisor.com', 'foursquare.com', 'yellowpages.com'
-            ];
-            
             if (hostname.includes('google.')) return false;
             
-            if (nonBusinessDomains.some(domain => hostname === domain || hostname.endsWith('.' + domain))) {
-                return false;
+            if (!allowSocial) {
+                // Exclude known non-business domains that might appear in business profiles
+                const nonBusinessDomains = [
+                    'facebook.com', 'twitter.com', 'instagram.com', 'youtube.com',
+                    'tiktok.com', 'linkedin.com', 'pinterest.com', 'yelp.com',
+                    'tripadvisor.com', 'foursquare.com', 'yellowpages.com'
+                ];
+                
+                if (nonBusinessDomains.some(domain => hostname === domain || hostname.endsWith('.' + domain))) {
+                    return false;
+                }
             }
             
             // Exclude common file extensions that aren't websites
@@ -2932,4 +2903,5 @@
     console.log('🌐 GeoLead AI content script loaded on Google Maps');
     console.log(`🌐 Page URL: ${window.location.href}`);
     console.log(`🌐 Visible cards on load: ${countVisibleCards()}`);
+    injectInterceptor();
 })();

@@ -51,6 +51,19 @@
       "run_at": "document_idle"
     }
   ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "interceptor.js"
+      ],
+      "matches": [
+        "https://www.google.com/*",
+        "https://maps.google.com/*",
+        "https://www.google.com.pk/*",
+        "https://maps.google.com.pk/*"
+      ]
+    }
+  ],
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'self'"
   }
