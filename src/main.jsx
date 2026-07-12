@@ -1275,7 +1275,7 @@ const App = () => {
           onClick={() => handleTabChange('leads')}
         >
           <ListPlus size={15} />
-          <span>Leads ({Object.values(state.sessions).reduce((sum, s) => sum + (s.leads?.length || 0), 0)})</span>
+          <span>Leads</span>
         </div>
         <div 
           className={`nav-item ${state.activeTab === 'settings' ? 'active' : ''}`}
