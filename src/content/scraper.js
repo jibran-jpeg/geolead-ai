@@ -555,13 +555,6 @@
 
             console.log(`[GeoLead] 📊 Final: ${dedupedLeads.length} unique leads saved.`);
 
-            // Send result and done messages
-            chrome.runtime.sendMessage({
-                type: MSG.SCRAPE_RESULT,
-                leads: dedupedLeads,
-                sessionId: currentSessionId
-            });
-
             chrome.runtime.sendMessage({
                 type: MSG.SCRAPE_DONE,
                 total: dedupedLeads.length,
