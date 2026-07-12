@@ -388,8 +388,7 @@
                         }
 
                         // ====== EXTRACT DETAILED FIELDS ======
-                        // 1. Check API Interceptor map
-                        const apiDetails = interceptedPlaces.get(nextBusinessName.toLowerCase().trim());
+                        // 1. Check API Interceptor map (apiDetails already retrieved above)
                         if (apiDetails) {
                             console.log(`[GeoLead DEBUG] API Interceptor payload matched for: "${nextBusinessName}"`);
                             if (apiDetails.phone) {
