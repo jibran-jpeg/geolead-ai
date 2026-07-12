@@ -294,7 +294,7 @@
                 }
 
                 // We have a valid unprocessed card!
-                console.log(`[GeoLead] 🔍 Processing Card #${currentFound + 1}: ${nextBusinessName}`);
+                console.log(`[GeoLead DEBUG] Business card detected: "${nextBusinessName}", URL: "${nextPlaceUrl}"`);
                 processedPlaceUrls.add(nextPlaceUrl);
 
                 // Try to click and scrape the details
@@ -306,16 +306,18 @@
                     try {
                         // Click the card
                         const clickTarget = nextCard.querySelector('a[href*="/maps/place/"]') || nextCard.querySelector('a.hfpxzc') || nextCard;
+                        console.log(`[GeoLead DEBUG] Clicking business card: "${nextBusinessName}" (Attempt ${retryCount + 1})...`);
                         clickTarget.scrollIntoView({ behavior: 'instant', block: 'center' });
                         await sleep(200);
                         clickTarget.click();
 
                         // Wait for details panel and verify correct business
-                        console.log(`[GeoLead] 🏢 Waiting for detail panel for: ${nextBusinessName} (Attempt ${retryCount + 1})...`);
+                        console.log(`[GeoLead DEBUG] Waiting for detail panel to load for: "${nextBusinessName}"...`);
                         const correctPanel = await waitForCorrectDetailPanel(nextBusinessName, 6000);
                         if (!correctPanel) {
                             throw new Error(`Detail panel title did not match expected business: ${nextBusinessName}`);
                         }
+                        console.log(`[GeoLead DEBUG] Detail panel loaded & verified for: "${nextBusinessName}"`);
 
                         // Wait for info section to render
                         await sleep(500);
@@ -342,11 +344,15 @@
                         // 1. Check API Interceptor map
                         const apiDetails = interceptedPlaces.get(nextBusinessName.toLowerCase().trim());
                         if (apiDetails) {
-                            console.log(`[GeoLead] 🚀 Found API interceptor payload for: ${nextBusinessName}`);
-                            if (apiDetails.phone) lead.phone = apiDetails.phone;
+                            console.log(`[GeoLead DEBUG] API Interceptor payload matched for: "${nextBusinessName}"`);
+                            if (apiDetails.phone) {
+                                lead.phone = apiDetails.phone;
+                                console.log(`[GeoLead DEBUG] Extracted phone from API: "${lead.phone}"`);
+                            }
                             if (apiDetails.website) {
                                 lead.website = apiDetails.website;
-                                lead.websiteStatus = 'VALID';
+                                lead.websiteStatus = 'HAS_WEBSITE';
+                                console.log(`[GeoLead DEBUG] Extracted website from API: "${lead.website}"`);
                             }
                             if (apiDetails.latitude) {
                                 lead.latitude = apiDetails.latitude;
@@ -360,8 +366,15 @@
                             const detailWeb = extractWebsiteFromDetailPanel();
                             if (detailWeb.website && !isGoogleOrMapsUrl(detailWeb.website)) {
                                 lead.website = detailWeb.website;
-                                lead.websiteStatus = detailWeb.websiteStatus;
+                                lead.websiteStatus = 'HAS_WEBSITE';
+                                console.log(`[GeoLead DEBUG] Extracted website from DOM: "${lead.website}"`);
+                            } else {
+                                lead.website = '';
+                                lead.websiteStatus = 'NO_WEBSITE';
+                                console.log(`[GeoLead DEBUG] No website found for: "${nextBusinessName}"`);
                             }
+                        } else {
+                            lead.websiteStatus = 'HAS_WEBSITE';
                         }
 
                         if (!lead.phone) {
@@ -373,7 +386,10 @@
                                     await sleep(250);
                                 }
                             }
-                            if (detailPhone) lead.phone = detailPhone;
+                            if (detailPhone) {
+                                lead.phone = detailPhone;
+                                console.log(`[GeoLead DEBUG] Extracted phone from DOM: "${lead.phone}"`);
+                            }
                         }
 
                         // Address, category, hours, and status
@@ -385,6 +401,7 @@
                             lead.state = addrComp.state;
                             lead.country = addrComp.country;
                             lead.postalCode = addrComp.postalCode;
+                            console.log(`[GeoLead DEBUG] Extracted address from DOM: "${lead.address}"`);
                         }
 
                         if (!lead.latitude) {
@@ -413,11 +430,12 @@
                         if (detailEmail) {
                             lead.email = detailEmail;
                             lead.emails = [detailEmail];
+                            console.log(`[GeoLead DEBUG] Extracted email from DOM: "${lead.email}"`);
                         }
 
                         // 3. Website contact crawl
                         if (lead.website && !isGoogleOrMapsUrl(lead.website)) {
-                            console.log(`[GeoLead] 🌐 Fetching website contacts for: ${lead.businessName}...`);
+                            console.log(`[GeoLead DEBUG] Triggering background website contact crawl for: "${lead.website}"...`);
                             try {
                                 const result = await new Promise((resolve) => {
                                     chrome.runtime.sendMessage({
@@ -434,10 +452,14 @@
                                     const merged = Array.from(new Set([...currentEmails, ...result.emails]));
                                     lead.emails = merged;
                                     lead.email = merged[0];
+                                    console.log(`[GeoLead DEBUG] Crawled emails: ${lead.emails.join(', ')}`);
                                 }
                                 if (result.phones && result.phones.length > 0 && !lead.phone) {
                                     const normalized = normalizePhoneNumber(result.phones[0]);
-                                    if (normalized) lead.phone = normalized;
+                                    if (normalized) {
+                                        lead.phone = normalized;
+                                        console.log(`[GeoLead DEBUG] Crawled phone: "${lead.phone}"`);
+                                    }
                                 }
                                 if (result.socials) {
                                     Object.keys(result.socials).forEach(key => {
@@ -450,7 +472,7 @@
                                     lead.websiteAnalysis = result.websiteAnalysis;
                                 }
                             } catch (e) {
-                                console.warn('[GeoLead] Background crawling failed:', e.message);
+                                console.warn('[GeoLead DEBUG] Background crawling failed:', e.message);
                             }
                         }
 
@@ -472,7 +494,7 @@
                         success = true;
                     } catch (err) {
                         retryCount++;
-                        console.warn(`[GeoLead] Retry ${retryCount} failed for ${nextBusinessName}:`, err.message);
+                        console.warn(`[GeoLead DEBUG] Retry ${retryCount} failed for "${nextBusinessName}":`, err.message);
                         await sleep(500);
                     }
                 }
@@ -482,10 +504,39 @@
                     if (lead.businessName && !duplicateDetection.isDuplicate(lead, scrapedLeads)) {
                         scrapedLeads.push(lead);
                         currentFound = scrapedLeads.length;
-                        console.log(`[GeoLead] ✅ Successfully saved lead: ${lead.businessName}`);
+                        console.log(`[GeoLead DEBUG] Lead object successfully created:`, JSON.stringify(lead));
+
+                        // Confirm session counters & storage write successfully before proceeding
+                        try {
+                            const saveResponse = await new Promise((resolve) => {
+                                chrome.runtime.sendMessage({
+                                    type: MSG.SCRAPE_RESULT,
+                                    leads: [lead],
+                                    sessionId: currentSessionId
+                                }, (res) => {
+                                    resolve(res || { success: false });
+                                });
+                            });
+
+                            if (saveResponse && saveResponse.success) {
+                                console.log(`[GeoLead DEBUG] Lead successfully written to storage: "${lead.businessName}"`);
+                                if (saveResponse.state) {
+                                    const session = saveResponse.state.sessions?.[currentSessionId];
+                                    if (session) {
+                                        console.log(`[GeoLead DEBUG] Session statistics updated: leadsCollected=${session.metadata?.leadsCollected}, businessesVisited=${session.metadata?.businessesVisited}`);
+                                    }
+                                }
+                            } else {
+                                console.error(`[GeoLead DEBUG] Storage write NOT confirmed by background for: "${lead.businessName}"`);
+                            }
+                        } catch (msgErr) {
+                            console.error('[GeoLead DEBUG] Verification messaging error:', msgErr);
+                        }
+                    } else {
+                        console.log(`[GeoLead DEBUG] Skipped duplicate lead: "${lead.businessName}"`);
                     }
                 } else {
-                    console.error(`[GeoLead] ❌ Failed to scrape business: ${nextBusinessName} after 3 retries. Skipping.`);
+                    console.error(`[GeoLead DEBUG] Failed to scrape business "${nextBusinessName}" after 3 retries. Skipping.`);
                 }
 
                 // Send progress update to UI

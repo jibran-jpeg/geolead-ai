@@ -363,6 +363,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 // Update session metadata
                 session.metadata.leadsCollected = updatedLeads.length;
                 session.metadata.duplicatesRemoved = duplicatesRemoved;
+                session.metadata.businessesVisited = (session.metadata.businessesVisited || 0) + uniqueNewLeads.length;
                 session.leads = updatedLeads;
                 session.updatedAt = new Date().toISOString();
                 
@@ -393,8 +394,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             }
             
             return { ...state, sessions };
+        }).then((updatedState) => {
+            try {
+                sendResponse({ success: true, state: updatedState });
+            } catch (e) {
+                // Ignore channel closed
+            }
         });
-        return false;
+        return true;
     }
 
     if (message.type === MSG.SCRAPE_DONE) {

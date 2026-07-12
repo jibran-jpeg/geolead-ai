@@ -498,20 +498,16 @@ const App = () => {
                 // Prefer the most recently active Maps tab
                 const activeTab = mapsTabs.find(t => t.active) || mapsTabs[mapsTabs.length - 1];
                 setRawState(prev => {
-                  const updated = {
+                  return {
                     ...prev,
                     isOnMapsPage: true,
                     activeTabId: activeTab.id
                   };
-                  chrome.storage.local.set({ geolead_state: updated });
-                  return updated;
                 });
               } else {
                 // No Maps tab found — mark as not on Maps
                 setRawState(prev => {
-                  const updated = { ...prev, isOnMapsPage: false, activeTabId: null };
-                  chrome.storage.local.set({ geolead_state: updated });
-                  return updated;
+                  return { ...prev, isOnMapsPage: false, activeTabId: null };
                 });
               }
             });
@@ -523,25 +519,32 @@ const App = () => {
           chrome.tabs.get(loadedState.scrapingTabId, (tab) => {
             if (chrome.runtime.lastError || !tab) {
               // Tab was closed, reset scraping state
-              loadedState.scrapeStatus = 'idle';
-              loadedState.scrapingTabId = null;
-              setRawState(loadedState);
-              chrome.storage.local.set({ geolead_state: loadedState });
+              chrome.storage.local.get(['geolead_state'], (result) => {
+                const fresh = result.geolead_state || loadedState;
+                fresh.scrapeStatus = 'idle';
+                fresh.scrapingTabId = null;
+                setRawState(fresh);
+                chrome.storage.local.set({ geolead_state: fresh });
+              });
               runActiveTabCheck(loadedState);
             } else {
               // Tab exists, ping content script to check if it's still running
               chrome.tabs.sendMessage(loadedState.scrapingTabId, { type: 'CHECK_MAPS_PAGE' }, (response) => {
                 if (chrome.runtime.lastError || !response || !response.isRunning) {
                   // Content script is dead or scraper is stopped
-                  loadedState.scrapeStatus = 'idle';
-                  loadedState.scrapingTabId = null;
-                  setRawState(loadedState);
-                  chrome.storage.local.set({ geolead_state: loadedState });
+                  chrome.storage.local.get(['geolead_state'], (result) => {
+                    const fresh = result.geolead_state || loadedState;
+                    fresh.scrapeStatus = 'idle';
+                    fresh.scrapingTabId = null;
+                    setRawState(fresh);
+                    chrome.storage.local.set({ geolead_state: fresh });
+                  });
                 } else {
-                  // Scraper is active! Sync progress
-                  loadedState.scrapeProgress = { found: response.found || 0, total: response.total || 30 };
-                  setRawState(loadedState);
-                  chrome.storage.local.set({ geolead_state: loadedState });
+                  // Scraper is active! Sync progress (update only React state, background will persist progress/leads)
+                  setRawState(prev => ({
+                    ...prev,
+                    scrapeProgress: { found: response.found || 0, total: response.total || 30 }
+                  }));
                 }
                 runActiveTabCheck(loadedState);
               });
