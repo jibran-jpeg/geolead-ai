@@ -1678,64 +1678,46 @@
         const POLL_INTERVAL = 200; // Faster polling for better responsiveness
         const normalizedExpected = normalizeForCompare(expectedName);
         let lastPanelName = '';
-        let stabilityCount = 0;
 
         while (Date.now() - start < timeoutMs) {
             const titleEl = document.querySelector('h1.DUwDvf, h2.DUwDvf, h1.fontHeadlineLarge, div.tAiQdd h1, div.lMbq3e h1');
             if (titleEl) {
                 const panelName = normalizeForCompare(titleEl.textContent || '');
-                
-                // Check if panel name has stabilized (not changing rapidly)
-                if (panelName === lastPanelName) {
-                    stabilityCount++;
-                    if (stabilityCount >= 2) {
-                        // Panel has stabilized, now check if it matches expected name
-                        console.log(`[GeoLead] Panel stabilized as: "${panelName}"`);
-                        
-                        // Enhanced matching strategies
-                        if (panelName === normalizedExpected) { 
-                            console.log(`[GeoLead] ✅ Perfect match found`);
-                            return true; 
-                        }
-                        if (normalizedExpected.includes(panelName) && panelName.length > 3) { 
-                            console.log(`[GeoLead] ✅ Expected includes panel name`);
-                            return true; 
-                        }
-                        if (panelName.includes(normalizedExpected) && normalizedExpected.length > 3) { 
-                            console.log(`[GeoLead] ✅ Panel name includes expected`);
-                            return true; 
-                        }
-                        // First N chars match (handles truncation)
-                        const minLen = Math.min(panelName.length, normalizedExpected.length, 15);
-                        if (minLen > 5 && panelName.substring(0, minLen) === normalizedExpected.substring(0, minLen)) { 
-                            console.log(`[GeoLead] ✅ First ${minLen} characters match`);
-                            return true; 
-                        }
-                        // Word overlap: if 2+ words match
-                        const expectedWords = normalizedExpected.split(/\s+/).filter(w => w.length > 2);
-                        const panelWords = panelName.split(/\s+/).filter(w => w.length > 2);
-                        const overlap = expectedWords.filter(w => panelWords.includes(w));
-                        if (overlap.length >= 2) { 
-                            console.log(`[GeoLead] ✅ ${overlap.length} words overlap: ${overlap.join(', ')}`);
-                            return true; 
-                        }
-                        
-                        // If we get here, the panel is stable but doesn't match
-                        console.log(`[GeoLead] ❌ Panel stabilized but doesn't match. Expected: "${normalizedExpected}", Got: "${panelName}"`);
-                        return false;
-                    }
-                } else {
-                    // Panel name changed, reset stability counter
-                    lastPanelName = panelName;
-                    stabilityCount = 0;
-                    console.log(`[GeoLead] Panel changed to: "${panelName}"`);
+                lastPanelName = panelName;
+
+                // Match strategies
+                if (panelName === normalizedExpected) { 
+                    console.log(`[GeoLead] ✅ Perfect match found: "${panelName}"`);
+                    return true; 
+                }
+                if (normalizedExpected.includes(panelName) && panelName.length > 3) { 
+                    console.log(`[GeoLead] ✅ Expected includes panel name: Expected="${normalizedExpected}", Got="${panelName}"`);
+                    return true; 
+                }
+                if (panelName.includes(normalizedExpected) && normalizedExpected.length > 3) { 
+                    console.log(`[GeoLead] ✅ Panel name includes expected: Expected="${normalizedExpected}", Got="${panelName}"`);
+                    return true; 
+                }
+                // First N chars match (handles truncation)
+                const minLen = Math.min(panelName.length, normalizedExpected.length, 15);
+                if (minLen > 5 && panelName.substring(0, minLen) === normalizedExpected.substring(0, minLen)) { 
+                    console.log(`[GeoLead] ✅ First ${minLen} characters match: "${panelName.substring(0, minLen)}"`);
+                    return true; 
+                }
+                // Word overlap: if 2+ words match
+                const expectedWords = normalizedExpected.split(/\s+/).filter(w => w.length > 2);
+                const panelWords = panelName.split(/\s+/).filter(w => w.length > 2);
+                const overlap = expectedWords.filter(w => panelWords.includes(w));
+                if (overlap.length >= 2) { 
+                    console.log(`[GeoLead] ✅ ${overlap.length} words overlap: ${overlap.join(', ')}`);
+                    return true; 
                 }
             }
             await sleep(POLL_INTERVAL);
         }
 
         console.log(`[GeoLead] ⏰ Timeout waiting for panel: "${expectedName}". Last check: "${lastPanelName}"`);
-        return false; // Return false to indicate timeout, let caller decide
+        return false;
     }
 
     /**
