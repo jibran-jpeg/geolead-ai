@@ -1206,7 +1206,7 @@ console.log(`[GeoLead] 🏢 Waiting for detail panel for: ${lead.businessName}`)
     /**
      * Parse all visible business cards with production-grade processing
      */
-    async function parseResults() {
+    function parseResults() {
         const leads = [];
         const seen = new Set();
         const cards = findBusinessCards();
