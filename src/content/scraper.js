@@ -218,6 +218,9 @@
         const scrollDelay = config.speed || 2000;
         const onlyWithoutWebsite = !!config.onlyWithoutWebsite;
 
+        // Dynamically scale rate limiter delay based on selected speed config
+        rateLimiter.minDelay = Math.max(500, scrollDelay - 500);
+
         try {
             // Step 1: Wait for feed stabilization
             const scrollContainer = findScrollContainer();
