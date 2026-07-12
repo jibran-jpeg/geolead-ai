@@ -72,15 +72,12 @@ const calculateLeadQualityScore = (lead) => {
   const rating = parseFloat(lead.rating);
   const reviews = parseInt(lead.reviewCount);
   
-  if (!isNaN(rating)) {
-    if (rating >= 4.0) score += 1.0;
-    else if (rating >= 3.0) score += 0.5;
+  if (!isNaN(rating) && rating > 0) {
+    score += Math.min(1.0, (rating / 5) * 1.0);
   }
   
   if (!isNaN(reviews) && reviews > 0) {
-    if (reviews > 100) score += 1.5;
-    else if (reviews >= 20) score += 1.0;
-    else score += 0.5;
+    score += Math.min(1.5, Math.log10(reviews + 1) / 2);
   }
   
   // 3. Marketing Intent / Online Awareness (Max 2.0 points)
@@ -149,7 +146,7 @@ const INITIAL_STATE = {
   scrapeProgress: { found: 0, total: 30 },
   scrapeError: '',
   selectedCategories: [],
-  isOnMapsPage: false,
+  isOnMapsPage: null,
   activeTabId: null,
   scrapingTabId: null,
   enrichProgress: { completed: 0, total: 0, currentLead: '', isEnriching: false },
@@ -1298,7 +1295,12 @@ const App = () => {
         {/* DASHBOARD TAB */}
         {state.activeTab === 'dashboard' && (
           <div className="tab-content fade-in">
-            {!state.isOnMapsPage ? (
+            {state.isOnMapsPage === null ? (
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '60px 20px', gap: '12px' }}>
+                <div style={{ border: '2.5px solid rgba(255, 255, 255, 0.05)', borderTop: '2.5px solid var(--primary)', borderRadius: '50%', width: '22px', height: '22px', animation: 'spin 1s linear infinite' }}></div>
+                <span style={{ fontSize: '11.5px', color: 'var(--text-secondary)' }}>Checking Google Maps connection...</span>
+              </div>
+            ) : !state.isOnMapsPage ? (
               <div className="card-premium text-center" style={{ padding: '30px 20px' }}>
                 <AlertTriangle size={32} color="#f59e0b" style={{ margin: '0 auto 12px auto' }} />
                 <h3 style={{ marginBottom: '6px', fontSize: '14px', fontWeight: 600 }}>Google Maps Required</h3>
