@@ -57,9 +57,9 @@
         "interceptor.js"
       ],
       "matches": [
-        "https://www.google.com/maps/*",
+        "https://www.google.com/*",
         "https://maps.google.com/*",
-        "https://www.google.com.pk/maps/*",
+        "https://www.google.com.pk/*",
         "https://maps.google.com.pk/*"
       ]
     }
