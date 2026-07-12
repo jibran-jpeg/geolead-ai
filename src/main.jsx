@@ -1414,7 +1414,7 @@ const App = () => {
                       {state.scrapeStatus === 'done' && (
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--success)', fontWeight: 500, marginBottom: '4px' }}>
                           <Check size={16} />
-                          <span>Successfully scraped {effectiveLeads.length} leads!</span>
+                          <span>Successfully scraped leads!</span>
                         </div>
                       )}
                       {state.scrapeStatus === 'error' && (
@@ -1475,7 +1475,7 @@ const App = () => {
                     {state.scrapeStatus === 'done' && (
                       <>
                         <div style={{ color: 'var(--success)' }}>&gt; Scraping completed successfully!</div>
-                        <div>&gt; Extracted {effectiveLeads.length} unique B2B leads.</div>
+                        <div>&gt; Extracted unique B2B leads.</div>
                         <div style={{ color: 'var(--info)' }}>&gt; Next steps: Go to "Leads" tab to review & export.</div>
                       </>
                     )}
