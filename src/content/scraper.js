@@ -218,6 +218,14 @@
         const scrollDelay = config.speed || 2000;
         const onlyWithoutWebsite = !!config.onlyWithoutWebsite;
 
+        // Dynamically scale sleep delays optimized for selected speed config
+        const delays = {
+            clickWait: scrollDelay <= 700 ? 50 : scrollDelay <= 1500 ? 100 : 200,
+            renderWait: scrollDelay <= 700 ? 150 : scrollDelay <= 1500 ? 300 : 500,
+            detailScrollWait: scrollDelay <= 700 ? 100 : scrollDelay <= 1500 ? 200 : 300,
+            phoneScrollWait: scrollDelay <= 700 ? 100 : scrollDelay <= 1500 ? 150 : 250
+        };
+
         // Dynamically scale rate limiter delay based on selected speed config
         rateLimiter.minDelay = Math.max(500, scrollDelay - 500);
 
@@ -314,6 +322,7 @@
                 let success = false;
                 let retryCount = 0;
                 let lead = null;
+                let isFilteredOut = false;
 
                 while (!success && retryCount < 3 && !shouldStop) {
                     try {
@@ -321,7 +330,7 @@
                         const clickTarget = nextCard.querySelector('a[href*="/maps/place/"]') || nextCard.querySelector('a.hfpxzc') || nextCard;
                         console.log(`[GeoLead DEBUG] Clicking business card: "${nextBusinessName}" (Attempt ${retryCount + 1})...`);
                         clickTarget.scrollIntoView({ behavior: 'instant', block: 'center' });
-                        await sleep(200);
+                        await sleep(delays.clickWait);
                         clickTarget.click();
 
                         // Wait for details panel and verify correct business
@@ -335,7 +344,7 @@
                         sendProgress(scrapedLeads.length, maxResults, 'Extracting Details...', nextBusinessName, processedCount, findBusinessCards().length);
 
                         // Wait for info section to render
-                        await sleep(500);
+                        await sleep(delays.renderWait);
 
                         // Scroll DOWN inside detail panel to trigger lazy loads
                         const detailContainer = getDetailPanelContainer();
@@ -344,7 +353,7 @@
                             : document.querySelector('.m6QErb.DxyBCb.kA9KIf.dS8AEf, .m6QErb.WNBkOb, .bJzME, div[role="main"]');
                         if (detailScroll) {
                             detailScroll.scrollBy({ top: 400, behavior: 'smooth' });
-                            await sleep(300);
+                            await sleep(delays.detailScrollWait);
                         }
 
                         // Create raw lead object from card
@@ -356,6 +365,26 @@
                                 placeUrl: nextPlaceUrl,
                                 scrapedAt: new Date().toISOString()
                             };
+                        }
+
+                        // ====== EARLY WEBSITE DETECTION FOR skipping HAS_WEBSITE leads ======
+                        const apiDetails = interceptedPlaces.get(nextBusinessName.toLowerCase().trim());
+                        if (apiDetails && apiDetails.website) {
+                            lead.website = apiDetails.website;
+                        }
+                        if (!lead.website) {
+                            const detailWeb = extractWebsiteFromDetailPanel();
+                            if (detailWeb.website && !isGoogleOrMapsUrl(detailWeb.website)) {
+                                lead.website = detailWeb.website;
+                            }
+                        }
+
+                        if (onlyWithoutWebsite && lead.website) {
+                            console.log(`[GeoLead DEBUG] Early skip for "${lead.businessName}" because it has a website: ${lead.website}`);
+                            success = true;
+                            isFilteredOut = true;
+                            lead = null;
+                            break; // Exit retry loop immediately
                         }
 
                         // ====== EXTRACT DETAILED FIELDS ======
@@ -401,7 +430,7 @@
                                 detailPhone = extractPhoneFromDetailPanel(lead);
                                 if (!detailPhone && detailScroll) {
                                     detailScroll.scrollBy({ top: 300, behavior: 'smooth' });
-                                    await sleep(250);
+                                    await sleep(delays.phoneScrollWait);
                                 }
                             }
                             if (detailPhone) {
@@ -517,7 +546,10 @@
                     }
                 }
 
-                if (success && lead) {
+                if (isFilteredOut) {
+                    processedCount++;
+                    sendProgress(scrapedLeads.length, maxResults, 'Filtering (Has Website)...', nextBusinessName, processedCount, findBusinessCards().length);
+                } else if (success && lead) {
                     // Prevent empty / duplicate / wrong data saving
                     if (lead.businessName && !duplicateDetection.isDuplicate(lead, scrapedLeads)) {
                         if (onlyWithoutWebsite && (lead.website || lead.websiteStatus === 'HAS_WEBSITE')) {
