@@ -436,7 +436,7 @@
                     
                     console.log(`[GeoLead] ✅ Found card for ${lead.businessName}`);
 
-                    const clickTarget = card.querySelector('a.hfpxzc');
+                    const clickTarget = card.querySelector('a[href*="/maps/place/"]') || card.querySelector('a.hfpxzc') || card.querySelector('a');
                     if (!clickTarget) {
                         sendProgress(i + 1, allLeads.length);
                         continue;
@@ -1178,10 +1178,11 @@ console.log(`[GeoLead] 🏢 Waiting for detail panel for: ${lead.businessName}`)
     // ====== DOM PARSER (inline for content script compatibility) ======
 
     const CARD_SELECTORS = [
+        'a[href*="/maps/place/"]',
+        'a.hfpxzc',
         'div.Nv2PK',
         'div[jsaction*="mouseover"].lI9IFe',
         'div[role="article"]',
-        'a.hfpxzc',
     ];
 
     const NAME_SELECTORS = [
@@ -1202,6 +1203,24 @@ console.log(`[GeoLead] 🏢 Waiting for detail panel for: ${lead.businessName}`)
         'span.UY7F9',
         'span.e4rVHe.fontBodyMedium',
     ];
+
+    function getCardContainerFromLink(a) {
+        if (!a) return null;
+        const feed = document.querySelector('div[role="feed"]');
+        if (!feed) {
+            return a.closest('div[role="article"]') || a.closest('div.Nv2PK') || a.parentElement?.parentElement?.parentElement || a.parentElement;
+        }
+        
+        let parent = a;
+        while (parent && parent !== document.body) {
+            if (parent.parentElement === feed) {
+                return parent;
+            }
+            parent = parent.parentElement;
+        }
+        
+        return a.closest('div[role="article"]') || a.closest('div.Nv2PK') || a.parentElement;
+    }
 
     /**
      * Parse all visible business cards with production-grade processing
@@ -1245,9 +1264,9 @@ console.log(`[GeoLead] 🏢 Waiting for detail panel for: ${lead.businessName}`)
         for (const selector of CARD_SELECTORS) {
             const cards = document.querySelectorAll(selector);
             if (cards.length > 0) {
-                if (cards[0].tagName === 'A') {
+                if (cards[0].tagName === 'A' || selector.startsWith('a')) {
                     return Array.from(cards)
-                        .map(a => a.closest('div.Nv2PK') || a.parentElement)
+                        .map(a => getCardContainerFromLink(a))
                         .filter(Boolean);
                 }
                 return Array.from(cards);
@@ -1443,7 +1462,7 @@ console.log(`[GeoLead] 🏢 Waiting for detail panel for: ${lead.businessName}`)
 
     function extractBusinessName(card) {
         // Heuristic: The most reliable source is the aria-label of the main wrapper link
-        const mainLink = card.querySelector('a.hfpxzc');
+        const mainLink = card.querySelector('a[href*="/maps/place/"]') || card.querySelector('a.hfpxzc') || card.querySelector('a');
         if (mainLink) {
             const label = mainLink.getAttribute('aria-label');
             if (label && label.trim().length > 0) return cleanBusinessName(label.trim());
@@ -1471,7 +1490,7 @@ console.log(`[GeoLead] 🏢 Waiting for detail panel for: ${lead.businessName}`)
     }
 
     function extractPlaceUrl(card) {
-        const linkEl = card.querySelector('a.hfpxzc') || card.querySelector('a[href*="maps"]');
+        const linkEl = card.querySelector('a[href*="/maps/place/"]') || card.querySelector('a.hfpxzc') || card.querySelector('a[href*="maps"]');
         return linkEl?.href || '';
     }
 
